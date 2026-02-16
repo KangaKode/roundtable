@@ -165,11 +165,57 @@ class MyAgent:
         return AgentVote(agent_name=self.name, approve=True)
 ```
 
-### Step 3: Verify it works
+### Step 3: Test your agent
+
+Create `tests/test_my_agent.py`:
+
+```python
+import pytest
+from src.{{ project_slug }}.agents.my_agent import MyAgent
+
+
+class TestMyAgent:
+    @pytest.mark.asyncio
+    async def test_analyze_returns_findings(self, mock_llm, sample_task):
+        """Test that your agent produces observations with evidence."""
+        agent = MyAgent(llm_client=mock_llm)
+        result = await agent.analyze(sample_task)
+
+        assert result.agent_name == "my_agent"
+        assert len(result.observations) > 0
+        for obs in result.observations:
+            assert "finding" in obs
+            assert "evidence" in obs
+
+    @pytest.mark.asyncio
+    async def test_analyze_without_llm(self, sample_task):
+        """Test graceful fallback when no LLM is configured."""
+        agent = MyAgent(llm_client=None)
+        result = await agent.analyze(sample_task)
+
+        assert result.agent_name == "my_agent"
+        assert len(result.observations) > 0
+
+    def test_agent_has_name_and_domain(self):
+        """Verify agent identity properties."""
+        agent = MyAgent()
+        assert agent.name == "my_agent"
+        assert len(agent.domain) > 0
+```
+
+The `mock_llm` and `sample_task` fixtures are provided by `conftest.py` -- no setup needed.
+
+Run your tests:
 
 ```bash
-make test     # Architecture tests should still pass
+make test           # Run all tests (yours + architecture + existing)
+make test-unit      # Run only unit tests
+make test-all       # Run with coverage report
 ```
+
+**Expected output:** All tests pass, including your new ones. The `mock_llm` fixture returns a pre-configured response so your tests don't need real API keys.
+
+> **Tip:** Look at the existing test files (`tests/test_agents.py`, `tests/test_orchestration.py`) for more patterns. Every test file follows the same structure: import the module, use fixtures, assert outcomes.
 
 ---
 
