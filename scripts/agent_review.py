@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""
+Automated agent review -- mechanical checks simulating what Cursor agents catch.
+
+Simulates three agents:
+  1. code-reviewer: docstrings, bare except, TODO hygiene, type hints
+  2. security-hardener: parameterized SQL, input validation, no plaintext secrets
+  3. minimalist: file size, function size, class size, complexity
+
+Usage: python scripts/agent_review.py [path_to_src]
+Exit code 0 = all passed, 1 = failures found.
+"""
+
+import ast
+import os
+import re
+import sys
+
+findings = []
+warnings = []
+
+
+def fail(agent, msg):
+    findings.append(f"  [{agent}] FAIL: {msg}")
+
+
+def warn(agent, msg):
+    warnings.append(f"  [{agent}] WARN: {msg}")
+
+
+# =============================================================================
+# CODE REVIEWER CHECKS
+# =============================================================================
+
+
+def review_code_quality(filepath, content, rel_path):
+    """Simulate code-reviewer agent checks."""
+    tree = None
+    try:
+        tree = ast.parse(content, filename=filepath)
+    except SyntaxError:
+        return
+
+    for node in ast.walk(tree):
+        # Bare except (catches too broadly)
+        if isinstance(node, ast.ExceptHandler) and node.type is None:
+            fail("code-reviewer", f"{rel_path}:{node.lineno} -- Bare 'except:' (catch specific exceptions)")
+
+        # Functions without docstrings (only public functions)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not node.name.startswith("_"):
+                if not (node.body and isinstance(node.body[0], ast.Expr)
+                        and isinstance(node.body[0].value, (ast.Constant, ast.Str))):
+                    warn("code-reviewer", f"{rel_path}:{node.lineno} -- Public function '{node.name}' missing docstring")
+
+        # Classes without docstrings
+        if isinstance(node, ast.ClassDef):
+            if not (node.body and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, (ast.Constant, ast.Str))):
+                fail("code-reviewer", f"{rel_path}:{node.lineno} -- Class '{node.name}' missing docstring")
+
+
+# =============================================================================
+# SECURITY HARDENER CHECKS
+# =============================================================================
+
+
+def review_security(filepath, content, rel_path):
+    """Simulate security-hardener agent checks."""
+    lines = content.split("\n")
+
+    for n, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+
+        # f-string in SQL execute
+        if re.search(r'\.execute\(f["\']', line):
+            fail("security", f"{rel_path}:{n} -- f-string in SQL execute (use parameterized queries)")
+
+        # .format() in SQL execute
+        if re.search(r'\.execute\(["\'].*\.format\(', line):
+            fail("security", f"{rel_path}:{n} -- .format() in SQL execute (use parameterized queries)")
+
+        # os.system or subprocess with shell=True
+        if re.search(r'os\.system\(', line):
+            fail("security", f"{rel_path}:{n} -- os.system() is unsafe (use subprocess.run with shell=False)")
+        if re.search(r'subprocess.*shell\s*=\s*True', line):
+            fail("security", f"{rel_path}:{n} -- subprocess with shell=True is unsafe")
+
+        # Hardcoded credentials (outside comments and test files)
+        if "test" not in rel_path.lower():
+            if re.search(r'(password|secret|token)\s*=\s*["\'][^"\']{8,}["\']', line, re.IGNORECASE):
+                if "default" not in line.lower() and "example" not in line.lower() and "changeme" not in line.lower():
+                    fail("security", f"{rel_path}:{n} -- Possible hardcoded credential")
+
+
+# =============================================================================
+# MINIMALIST CHECKS
+# =============================================================================
+
+MAX_FILE_LINES = 500
+MAX_FUNCTION_LINES = 50
+MAX_CLASS_LINES = 300
+
+
+def review_minimalist(filepath, content, rel_path):
+    """Simulate minimalist agent checks."""
+    lines = content.split("\n")
+    line_count = len(lines)
+
+    # File size
+    if line_count > MAX_FILE_LINES:
+        fail("minimalist", f"{rel_path} -- {line_count} lines (max {MAX_FILE_LINES}). Split into smaller modules.")
+
+    # Function and class size via AST
+    try:
+        tree = ast.parse(content, filename=filepath)
+    except SyntaxError:
+        return
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if hasattr(node, "end_lineno") and node.end_lineno:
+                func_lines = node.end_lineno - node.lineno + 1
+                if func_lines > MAX_FUNCTION_LINES:
+                    warn("minimalist",
+                         f"{rel_path}:{node.lineno} -- Function '{node.name}' is {func_lines} lines "
+                         f"(recommended max {MAX_FUNCTION_LINES})")
+
+        if isinstance(node, ast.ClassDef):
+            if hasattr(node, "end_lineno") and node.end_lineno:
+                class_lines = node.end_lineno - node.lineno + 1
+                if class_lines > MAX_CLASS_LINES:
+                    warn("minimalist",
+                         f"{rel_path}:{node.lineno} -- Class '{node.name}' is {class_lines} lines "
+                         f"(recommended max {MAX_CLASS_LINES})")
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+
+def main():
+    src_dir = sys.argv[1] if len(sys.argv) > 1 else "."
+
+    if not os.path.isdir(src_dir):
+        print(f"Source directory not found: {src_dir}")
+        sys.exit(1)
+
+    print(f"Running automated agent review on {src_dir}...")
+
+    file_count = 0
+    for root, dirs, files in os.walk(src_dir):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for fname in files:
+            if not fname.endswith(".py"):
+                continue
+            filepath = os.path.join(root, fname)
+            rel_path = os.path.relpath(filepath, src_dir)
+            try:
+                with open(filepath) as f:
+                    content = f.read()
+                review_code_quality(filepath, content, rel_path)
+                review_security(filepath, content, rel_path)
+                review_minimalist(filepath, content, rel_path)
+                file_count += 1
+            except Exception as e:
+                fail("agent-review", f"{rel_path} -- Could not process: {e}")
+
+    print(f"  Reviewed {file_count} files")
+    print()
+
+    if warnings:
+        print(f"Warnings ({len(warnings)}):")
+        for w in warnings:
+            print(w)
+        print()
+
+    if findings:
+        print(f"\033[31mAgent Review Failures ({len(findings)}):\033[0m")
+        for f in findings:
+            print(f)
+        print()
+        sys.exit(1)
+    else:
+        print(f"\033[32m✓ Agent review passed ({file_count} files, 0 failures, {len(warnings)} warnings)\033[0m")
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

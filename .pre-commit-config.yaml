@@ -1,0 +1,61 @@
+# Pre-commit hooks for the aiscaffold scaffold repo.
+# Fast checks only (<5 seconds total). Full validation runs in CI.
+#
+# Install: pre-commit install
+# Manual:  pre-commit run --all-files
+
+repos:
+  # Quick template checks (banned patterns, file sizes, IP protection, syntax)
+  - repo: local
+    hooks:
+      - id: quick-checks
+        name: Quick template validation
+        entry: python3 scripts/quick_checks.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+  # Prevent committing secrets
+  - repo: local
+    hooks:
+      - id: no-secrets
+        name: No hardcoded secrets
+        entry: python3 -c "
+import re, sys;
+patterns = [
+    (r'[\"\\']sk-[a-zA-Z0-9]{20,}[\"\\']', 'API key (sk-...)'),
+    (r'AKIA[0-9A-Z]{16}', 'AWS access key'),
+];
+found = False;
+for f in sys.argv[1:]:
+    try:
+        content = open(f).read();
+        for p, d in patterns:
+            for m in re.finditer(p, content):
+                print(f'SECRET FOUND in {f}: {d}');
+                found = True
+    except: pass
+sys.exit(1 if found else 0)
+"
+        language: system
+        types: [python]
+
+  # Prevent large files
+  - repo: local
+    hooks:
+      - id: file-size-check
+        name: File size limit (800 lines)
+        entry: python3 -c "
+import sys;
+failed = False;
+for f in sys.argv[1:]:
+    try:
+        lines = len(open(f).readlines());
+        if lines > 800:
+            print(f'BLOCKED: {f} is {lines} lines (max 800)');
+            failed = True
+    except: pass
+sys.exit(1 if failed else 0)
+"
+        language: system
+        types: [python]
