@@ -6,14 +6,17 @@ before it enters the system. Never pass raw dicts or unvalidated
 strings through multiple layers.
 
 Reference: docs/AI_ENGINEERING_BEST_PRACTICES_2026.md (Part 7.2)
-
-Keep this file under 100 lines.
 """
 
+import ipaddress
 import logging
 import re
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_URL_SCHEMES = {"http", "https"}
+BLOCKED_HOSTNAMES = {"localhost", "metadata.google.internal"}
 
 
 class ValidationError(ValueError):
@@ -65,3 +68,101 @@ def validate_positive_number(value: float | int, field_name: str = "number") -> 
     if value <= 0:
         raise ValidationError(f"{field_name} must be positive (got {value})")
     return float(value)
+
+
+def _is_private_ip(hostname: str) -> bool:
+    """Check if a hostname resolves to a private/loopback IP address."""
+    try:
+        addr = ipaddress.ip_address(hostname)
+        return addr.is_private or addr.is_loopback or addr.is_link_local
+    except ValueError:
+        return False
+
+
+def validate_url(
+    url: str,
+    field_name: str = "url",
+    allow_private: bool = False,
+) -> str:
+    """
+    Validate a URL for safe outbound requests (anti-SSRF).
+
+    Blocks:
+      - Non-http/https schemes (file://, gopher://, ftp://, etc.)
+      - Private IPs (10.x, 172.16.x, 192.168.x, 127.x, ::1)
+      - Link-local addresses (169.254.x -- cloud metadata endpoints)
+      - Known dangerous hostnames (localhost, metadata.google.internal)
+      - Empty or malformed URLs
+
+    Args:
+        url: The URL to validate.
+        field_name: Field name for error messages.
+        allow_private: If True, skip private IP checks (for local dev only).
+
+    Returns:
+        The validated URL string.
+
+    Raises:
+        ValidationError: If the URL is unsafe.
+    """
+    if not url or not url.strip():
+        raise ValidationError(f"{field_name} cannot be empty")
+
+    parsed = urlparse(url.strip())
+
+    if parsed.scheme not in ALLOWED_URL_SCHEMES:
+        raise ValidationError(
+            f"{field_name} must use http or https (got '{parsed.scheme}')"
+        )
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValidationError(f"{field_name} must include a hostname")
+
+    hostname_lower = hostname.lower()
+    if hostname_lower in BLOCKED_HOSTNAMES:
+        raise ValidationError(
+            f"{field_name} cannot point to {hostname_lower}"
+        )
+
+    if not allow_private and _is_private_ip(hostname):
+        raise ValidationError(
+            f"{field_name} cannot point to private/internal addresses"
+        )
+
+    if not allow_private and hostname_lower.endswith(".internal"):
+        raise ValidationError(
+            f"{field_name} cannot point to internal hostnames"
+        )
+
+    logger.debug(f"[Validators] URL validated: {parsed.scheme}://{hostname}")
+    return url.strip()
+
+
+def validate_list_size(
+    items: list,
+    field_name: str = "list",
+    max_items: int = 100,
+) -> list:
+    """Validate that a list does not exceed a maximum number of items."""
+    if len(items) > max_items:
+        raise ValidationError(
+            f"{field_name} cannot have more than {max_items} items (got {len(items)})"
+        )
+    return items
+
+
+def validate_dict_size(
+    data: dict,
+    field_name: str = "data",
+    max_size_bytes: int = 1_000_000,
+) -> dict:
+    """Validate that a serialized dict does not exceed a maximum byte size."""
+    import json
+
+    serialized = json.dumps(data, default=str)
+    if len(serialized) > max_size_bytes:
+        raise ValidationError(
+            f"{field_name} exceeds maximum size of {max_size_bytes} bytes"
+        )
+    return data

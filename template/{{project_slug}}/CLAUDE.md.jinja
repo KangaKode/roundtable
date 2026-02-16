@@ -10,8 +10,6 @@
 
 {{ project_description }}
 
-<!-- Replace this with a detailed 2-3 sentence description of your project -->
-
 **Canonical architecture doc:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ### Layering Rules (enforced by lint)
@@ -22,6 +20,16 @@
 {{ layer | trim }}/ {% if loop.first %}(bottom layer -- NEVER imports from layers above){% elif loop.last %}(top layer -- can import from layers below){% else %}(middle layer -- imports only from layers below){% endif %}
 {% endfor -%}
 ```
+
+Additional modules (not in the layer stack):
+- `llm/` -- Isolated LLM client (no cross-imports)
+- `security/` -- Prompt guard, validators (imported by any layer)
+{% if include_api_gateway -%}
+- `api/` -- FastAPI gateway (imports from all layers)
+{% endif -%}
+{% if include_learning -%}
+- `learning/` -- Feedback, trust, preferences, RAG (imports from security/)
+{% endif -%}
 
 Violation of these rules will be caught by `tests/test_architecture.py`.
 
@@ -35,6 +43,7 @@ Violation of these rules will be caught by `tests/test_architecture.py`.
 - Add logging for debugging (`logger.debug(f"[ComponentName] message")`)
 - Keep files under 500 lines
 - Use dataclasses for domain models, parse at boundaries
+- Security: sanitize all external input, parameterized SQL, validate URLs
 {% if persistence == 'sqlite' -%}
 - All data persists to SQLite; session state is for UI convenience only
 {% elif persistence == 'postgres' -%}
@@ -47,11 +56,41 @@ Violation of these rules will be caught by `tests/test_architecture.py`.
 
 ## Core Systems
 
-<!-- Add your project's core systems here. Example format: -->
-<!-- ### System Name (Importance: X/100) -->
-<!-- Brief description of what it does. -->
-<!-- **Key files:** `module/file.py` -->
-<!-- **Details:** [.cursor/rules/system-name.mdc](.cursor/rules/system-name.mdc) -->
+### LLM Client (Importance: 95/100)
+Provider-agnostic wrapper with automatic prompt caching. Use `CacheablePrompt` to separate stable prefix from dynamic content for token savings.
+**Key files:** `llm/client.py`
+
+### Round Table (Importance: 90/100)
+Full 4-phase multi-agent deliberation: Strategy, Independent Analysis, Challenge, Synthesis + Voting. For complex decisions needing all perspectives.
+**Key files:** `orchestration/round_table.py`
+
+### Chat Orchestrator (Importance: 90/100)
+Lightweight orchestrator-worker pattern. Lead agent selects 1-3 specialists, cross-checks responses, surfaces disagreements, escalates to round table when needed.
+**Key files:** `orchestration/chat_orchestrator.py`, `orchestration/agent_router.py`
+
+### Agent System (Importance: 85/100)
+Local agents implement `AgentProtocol`. Remote agents (any language) connect over HTTP via `RemoteAgent` adapter. `AgentRegistry` manages all agents.
+**Key files:** `agents/example_agent.py`, `agents/remote.py`, `agents/registry.py`
+
+{% if include_api_gateway -%}
+### API Gateway (Importance: 85/100)
+FastAPI server with 10 route modules. Auth middleware (API key), rate limiting, CORS. SSE streaming for chat.
+**Key files:** `api/gateway.py`, `api/routes/`
+{% endif -%}
+
+### Security (Importance: 95/100)
+Prompt injection defense, SSRF protection, input validation, rate limiting, HMAC webhooks. Security is wired into every module, not bolted on.
+**Key files:** `security/prompt_guard.py`, `security/validators.py`
+
+{% if include_learning -%}
+### Learning System (Importance: 80/100)
+Feedback tracking, agent trust scores (EMA), check-in manager (never adapts silently), user profile synthesis, RAG preference retrieval, cross-project graduation.
+**Key files:** `learning/feedback_tracker.py`, `learning/agent_trust.py`, `learning/checkin_manager.py`, `learning/user_profile.py`
+{% endif -%}
+
+### Session Lifecycle (Importance: 75/100)
+Item/Turn/Thread model with Initializer/Worker pattern. Startup ritual loads state; cleanup ritual persists progress.
+**Key files:** `harness/session.py`
 
 ---
 
@@ -63,6 +102,7 @@ Violation of these rules will be caught by `tests/test_architecture.py`.
 - Evals: `evals/` directory for capability and regression evals
 {% endif -%}
 - Pre-commit: Black, Ruff, Bandit
+- Red team: `scripts/red_team_check.py` blocks commits with security findings
 
 **Standards:** [docs/TESTING_STANDARDS.md](docs/TESTING_STANDARDS.md)
 
@@ -81,9 +121,10 @@ Violation of these rules will be caught by `tests/test_architecture.py`.
 
 | Category | Location | Description |
 |----------|----------|-------------|
-| Architecture | `docs/ARCHITECTURE.md` | Layering rules, dependency directions |
+| Architecture | `docs/ARCHITECTURE.md` | Layering rules, dependency directions, core systems |
 | Testing | `docs/TESTING_STANDARDS.md` | Testing conventions |
 | Quality | `docs/QUALITY_SCORE.md` | Per-domain quality grades |
-| Best Practices | `docs/AI_ENGINEERING_BEST_PRACTICES_2026.md` | 2026 AI engineering patterns (all agents reference this) |
+| Best Practices | `docs/AI_ENGINEERING_BEST_PRACTICES_2026.md` | 2026 AI engineering patterns |
+| Eval Scaling | `docs/EVAL_SCALING_GUIDE.md` | Scaling evals, graduation pattern |
 
 **Full index:** [docs/INDEX.md](docs/INDEX.md)

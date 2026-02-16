@@ -248,19 +248,35 @@ class RoundTable:
         )
         return result
 
+    def _build_system_prompt(self) -> str:
+        """Build the stable system prompt (cached across calls)."""
+        agent_info = ", ".join(f"{a.name} ({a.domain})" for a in self.agents)
+        return (
+            f"You are an orchestrator coordinating {len(self.agents)} specialist agents: "
+            f"{agent_info}.\n\n"
+            f"Rules:\n"
+            f"- Preserve ALL evidence fields from agent outputs\n"
+            f"- Do NOT summarize away supporting quotes, data, or citations\n"
+            f"- Surface disagreements -- minority views are valuable\n"
+            f"- Return valid JSON"
+        )
+
     async def _phase_strategy(self, task: RoundTableTask) -> StrategyPlan:
         """Phase 0: Orchestrator plans before dispatching."""
-        agent_info = ", ".join(f"{a.name} ({a.domain})" for a in self.agents)
-        prompt = (
-            f"You are coordinating {len(self.agents)} specialist agents: {agent_info}.\n\n"
-            f"Task: {task.content}\n\n"
-            f"Before dispatching the team, plan your strategy:\n"
-            f"1. How does this task decompose into sub-problems?\n"
-            f"2. What should each agent specifically focus on?\n"
-            f"3. What disagreements do you anticipate between agents?\n"
-            f"4. What are the success criteria?\n\n"
-            f'Return JSON: {{"task_decomposition": [...], "agent_focus_areas": {{...}}, '
-            f'"anticipated_tensions": [...], "success_criteria": [...]}}'
+        from ..llm import CacheablePrompt
+
+        prompt = CacheablePrompt(
+            system=self._build_system_prompt(),
+            user_message=(
+                f"Task: {task.content}\n\n"
+                f"Before dispatching the team, plan your strategy:\n"
+                f"1. How does this task decompose into sub-problems?\n"
+                f"2. What should each agent specifically focus on?\n"
+                f"3. What disagreements do you anticipate between agents?\n"
+                f"4. What are the success criteria?\n\n"
+                f'Return JSON: {{"task_decomposition": [...], "agent_focus_areas": {{...}}, '
+                f'"anticipated_tensions": [...], "success_criteria": [...]}}'
+            ),
         )
         try:
             response = await self.llm.call(prompt=prompt, role="synthesis", temperature=0.3)
@@ -308,24 +324,28 @@ class RoundTable:
         self, task: RoundTableTask, partial: RoundTableResult
     ) -> SynthesisResult:
         """Phase 3a: Synthesize analyses. CRITICAL: preserve ALL evidence fields."""
+        from ..llm import CacheablePrompt
+
         if not self.llm:
             return SynthesisResult(recommended_direction="No LLM available for synthesis")
 
-        # Include FULL observations with evidence (no lossy formatting)
         analyses_json = json.dumps(
             [{"agent": a.agent_name, "domain": a.domain,
               "observations": a.observations, "recommendations": a.recommendations,
               "confidence": a.confidence} for a in partial.analyses],
             indent=2,
         )
-        prompt = (
-            f"Synthesize these specialist analyses into a recommendation.\n\n"
-            f"CRITICAL: Preserve ALL evidence fields from each observation. "
-            f"Do NOT summarize away supporting quotes, data, or citations.\n\n"
-            f"Analyses:\n{analyses_json}\n\n"
-            f"Return JSON: {{\"recommended_direction\": \"...\", "
-            f"\"key_findings\": [{{\"agent_name\": ..., \"finding\": ..., \"evidence\": ...}}], "
-            f"\"trade_offs\": [...], \"minority_views\": [...]}}"
+        prompt = CacheablePrompt(
+            system=self._build_system_prompt(),
+            context=(
+                f"Analyses from {len(partial.analyses)} agents:\n{analyses_json}"
+            ),
+            user_message=(
+                f"Synthesize these specialist analyses into a recommendation.\n\n"
+                f"Return JSON: {{\"recommended_direction\": \"...\", "
+                f"\"key_findings\": [{{\"agent_name\": ..., \"finding\": ..., \"evidence\": ...}}], "
+                f"\"trade_offs\": [...], \"minority_views\": [...]}}"
+            ),
         )
         try:
             response = await self.llm.call(prompt=prompt, role="synthesis", temperature=0.2)

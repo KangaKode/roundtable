@@ -171,6 +171,8 @@ class SessionProtocol:
         self.work_dir = work_dir
         self.is_first_run = is_first_run
         self._thread: Thread | None = None
+        self._user_context: str = ""
+        self._pending_feedback: list = []
         logger.info(f"[Session] Protocol initialized (first_run={is_first_run})")
 
     @property
@@ -188,8 +190,24 @@ class SessionProtocol:
         logger.info("[Session] Running first-run initialization")
 
     async def startup(self) -> None:
-        """EVERY RUN: Read task list, progress notes, get up to speed."""
+        """EVERY RUN: Read task list, progress notes, get up to speed.
+
+        Learning system integration: loads user profile and preferences
+        into self._user_context if the learning module is available.
+        """
         logger.info("[Session] Running startup ritual")
+
+        try:
+            from ..learning.user_profile import UserProfileManager
+
+            profile_mgr = UserProfileManager()
+            self._user_context = profile_mgr.get_context_bundle()
+            if self._user_context:
+                logger.info("[Session] Loaded user preferences into context")
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"[Session] Learning system not available: {e}")
 
     async def health_check(self) -> bool:
         """Verify system is healthy before starting work. Return False to abort."""
@@ -201,8 +219,40 @@ class SessionProtocol:
         raise NotImplementedError("Override work() with your agent logic")
 
     async def cleanup(self) -> None:
-        """EVERY RUN: Update progress, commit state, leave clean."""
+        """EVERY RUN: Update progress, commit state, leave clean.
+
+        Learning system integration: flushes any pending feedback signals
+        and checks for graduation candidates.
+        """
         logger.info("[Session] Running cleanup ritual")
+
+        if self._pending_feedback:
+            try:
+                from ..learning.feedback_tracker import FeedbackTracker
+
+                tracker = FeedbackTracker()
+                for signal in self._pending_feedback:
+                    tracker.record(signal)
+                logger.info(
+                    f"[Session] Recorded {len(self._pending_feedback)} "
+                    f"feedback signals"
+                )
+                self._pending_feedback.clear()
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.debug(f"[Session] Feedback flush failed: {e}")
+
+    def queue_feedback(self, signal) -> None:
+        """Queue a feedback signal to be recorded during cleanup.
+
+        Usage in work():
+            from ..learning.models import FeedbackSignal
+            self.queue_feedback(FeedbackSignal(
+                signal_type="accept", agent_id="analyst", context_type="session"
+            ))
+        """
+        self._pending_feedback.append(signal)
 
     # =========================================================================
     # DO NOT OVERRIDE -- ENFORCES RITUAL ORDERING

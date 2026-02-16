@@ -94,6 +94,21 @@ include_llm_client:
   default: true
   help: "Include LLM client boilerplate?"
 
+include_api_gateway:
+  type: bool
+  default: true
+  help: "Include API gateway (FastAPI) for external access and remote agents?"
+
+include_deployment:
+  type: bool
+  default: true
+  help: "Include deployment infrastructure (Dockerfile, docker-compose, K8s)?"
+
+include_learning:
+  type: bool
+  default: false
+  help: "Include learning system (feedback tracking, user profiles, RAG)?"
+
 # =============================================================================
 # POST-GENERATION
 # =============================================================================
@@ -109,14 +124,23 @@ _tasks:
   - "echo ''"
   - "echo 'Project {{ project_name }} created!'"
   - "echo ''"
-  - "echo '  14 subagents installed (.cursor/agents/)'"
-  - "echo '  Architecture tests ready (tests/test_architecture.py)'"
+  - "echo '  14 subagents (.cursor/agents/)'"
+  - "echo '  Architecture enforcement (tests/test_architecture.py)'"
   - "echo '  Red team pre-commit hook (scripts/red_team_check.py)'"
   - "echo '  CI/CD pipeline (.github/workflows/ci.yml)'"
+  - "echo '  LLM client with prompt caching (src/{{ project_slug }}/llm/)'"
+  - "echo '  Round Table + Chat Orchestrator (src/{{ project_slug }}/orchestration/)'"
+  - "echo '  Security hardened (SSRF, injection, rate limiting, auth)'"
+  - "{% if include_api_gateway %}echo '  API gateway with 10 routes (src/{{ project_slug }}/api/)'{% else %}echo ''{% endif %}"
+  - "{% if include_deployment %}echo '  Docker + K8s deployment ready'{% else %}echo ''{% endif %}"
+  - "{% if include_learning %}echo '  Learning system (feedback, trust, preferences, RAG)'{% else %}echo ''{% endif %}"
   - "echo ''"
   - "echo 'Next steps:'"
   - "echo '  cd {{ project_slug }}'"
   - "echo '  python3 -m venv venv && source venv/bin/activate'"
   - "echo '  pip install -r requirements.txt'"
+  - "echo '  cp .env.example .env  # Add your API keys'"
   - "echo '  pre-commit install'"
   - "echo '  make test'"
+  - "{% if include_api_gateway %}echo '  make serve         # Start API gateway (http://localhost:8000/docs)'{% else %}echo ''{% endif %}"
+  - "{% if include_deployment %}echo '  make docker-run    # Run with Docker'{% else %}echo ''{% endif %}"

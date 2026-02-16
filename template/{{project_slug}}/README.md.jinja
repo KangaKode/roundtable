@@ -12,6 +12,10 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
+# Copy environment variables
+cp .env.example .env
+# Edit .env with your API keys
+
 # Install pre-commit hooks
 pre-commit install
 
@@ -19,18 +23,69 @@ pre-commit install
 make test
 ```
 
+{% if include_api_gateway -%}
+## Start the API
+
+```bash
+# Development (auto-reload)
+make serve
+
+# Production (4 workers)
+make serve-prod
+
+# API docs at http://localhost:8000/docs
+```
+{% endif %}
+
+{% if include_deployment -%}
+## Deploy
+
+```bash
+# Docker
+make docker-build
+make docker-run        # http://localhost:8000
+
+# Kubernetes
+make k8s-deploy
+make k8s-status
+```
+{% endif %}
+
+{% if include_api_gateway -%}
+## Register External Agents
+
+External agents in any language implement 3 endpoints (`/analyze`, `/challenge`, `/vote`):
+
+```bash
+curl -X POST http://localhost:8000/api/v1/agents \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my_agent", "domain": "code analysis", "base_url": "http://my-agent:3000"}'
+```
+{% endif %}
+
 ## Project Structure
 
 ```
 {{ project_slug }}/
-{% set layer_list = layers.split(',') -%}
-{% for layer in layer_list -%}
-  {{ layer | trim }}/          # {{ layer | trim | title }} layer
-{% endfor -%}
-  docs/             # Documentation
-  tests/            # Tests
-  scripts/          # Utility scripts
-  .cursor/agents/   # AI subagents
+  src/{{ project_slug }}/
+    agents/           # Agent implementations (local + remote)
+{% if include_api_gateway -%}
+    api/              # FastAPI gateway (routes, models, middleware)
+{% endif -%}
+    harness/          # Session lifecycle
+    llm/              # LLM client with prompt caching
+    orchestration/    # Round Table + Chat Orchestrator
+    security/         # Prompt guard, validators
+{% if include_learning -%}
+    learning/         # Feedback, trust, preferences, RAG
+{% endif -%}
+{% if include_deployment -%}
+  deploy/k8s/         # Kubernetes manifests
+{% endif -%}
+  docs/               # Documentation
+  tests/              # Tests
+  scripts/            # Utility scripts
+  .cursor/agents/     # 14 AI subagents
 ```
 
 ## Development
@@ -41,6 +96,13 @@ make test-p0     # Run critical tests only
 make lint        # Run linters
 make format      # Format code (Black)
 make doctor      # Check project structure
+make red-team    # Run red team security checks
+{% if include_api_gateway -%}
+make serve       # Start API gateway
+{% endif -%}
+{% if include_deployment -%}
+make docker-run  # Run with Docker
+{% endif -%}
 ```
 
 ## Architecture

@@ -1,14 +1,16 @@
-# aiscaffold v2
+# aiscaffold v3
 
-**Gold Standard AI Agent Project Scaffold -- Secure, Accurate, Human-in-the-Loop**
+**Production-Ready AI Agent Platform Scaffold -- Secure, Scalable, Language-Agnostic**
 
-One command to set up a new AI agent project with everything built in: 4-phase round table protocol, 20 eval tasks, prompt injection defense, session lifecycle management, 15 subagents, architecture enforcement, and quality tracking.
+One command to set up a new AI agent project with everything built in: API gateway for external agents in any language, multi-agent round table and chat orchestrator, prompt caching, deployment infrastructure (Docker + Kubernetes), vanilla learning system, security hardened at every boundary, and 14 AI subagents for development.
 
-Every project scaffolded by aiscaffold v2 is designed to be:
-- **Secure** -- prompt injection defense, input validation, secrets management from day 1
-- **Hallucination-resistant** -- evidence requirements in every agent prompt, fact-grounding patterns
-- **Accurate** -- 20 eval tasks that catch drift, regression suites, model-based graders
-- **Human-in-the-loop** -- approval gates in round table, session health checks, confirmation before adaptation
+Every project scaffolded by aiscaffold v3 is designed to be:
+- **Secure** -- SSRF protection, prompt injection defense, rate limiting, HMAC webhooks, input validation at every boundary
+- **Hallucination-resistant** -- evidence requirements in every agent prompt, cross-checking in chat, full deliberation in round table
+- **Scalable** -- Docker, docker-compose, Kubernetes with HPA, external agents over HTTP in any language
+- **Cost-efficient** -- automatic prompt caching (90% token savings on stable prefixes), token tracking per call
+- **Learning** -- feedback tracking, trust scores, preference graduation, permission-based adaptation
+- **Human-in-the-loop** -- approval gates, check-in system, escalation from chat to round table
 
 ---
 
@@ -21,20 +23,88 @@ pip install copier
 # Create a new project
 copier copy gh:KangaKode/aiscaffold my-project --trust
 
-# Follow the prompts: name, type, layers, LLM provider, persistence
+# Follow the prompts: name, type, layers, LLM provider, persistence, options
 # Then:
 cd my-project
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 pre-commit install
-make test  # Architecture tests pass from day 1
+make test       # Architecture tests pass from day 1
+make serve      # Start the API gateway
 ```
 
 ---
 
 ## What You Get
 
-Every scaffolded project includes **39 files** out of the box:
+Every scaffolded project includes **47+ Python source files** across 8 modules:
+
+### Two Interaction Modes
+
+- **Round Table** -- Full 4-phase multi-agent deliberation (Strategy, Independent Analysis, Challenge, Synthesis + Voting). For complex decisions needing all perspectives.
+- **Chat Orchestrator** -- Lightweight real-time chat. A lead agent selectively consults 1-3 specialists, cross-checks for agreement, and escalates to the round table when needed.
+
+### API Gateway (FastAPI)
+
+10 route modules exposing everything over HTTP:
+
+- `POST /api/v1/round-table/tasks` -- Submit task for full multi-agent deliberation
+- `POST /api/v1/chat` -- Send message to chat orchestrator
+- `POST /api/v1/chat/stream` -- Same, with Server-Sent Events streaming
+- `POST /api/v1/agents` -- Register external agent (any language)
+- `GET  /api/v1/agents` -- List registered agents with health status
+- `POST /api/v1/feedback` -- Record user feedback signal
+- `GET  /api/v1/preferences` -- List learned preferences
+- `GET  /api/v1/preferences/search?q=` -- Semantic preference search
+- `GET  /api/v1/checkins` -- List pending check-ins
+- `GET  /health` -- Liveness, readiness, and metrics
+
+### External Agent Support (Any Language)
+
+External agents implement 3 HTTP endpoints in any language:
+
+```
+POST /analyze   -- Independent analysis with evidence
+POST /challenge -- Challenge other agents' findings
+POST /vote      -- Vote on synthesis
+```
+
+The `RemoteAgent` adapter wraps these as `AgentProtocol` -- the round table and chat orchestrator see no difference between local Python agents and remote TypeScript/Go/Rust agents.
+
+### LLM Client with Prompt Caching
+
+Provider-agnostic client (Anthropic, OpenAI, Google) with automatic prompt caching:
+- `CacheablePrompt(system, context, user_message)` separates stable prefix from dynamic content
+- Anthropic: `cache_control` for 90% input token savings
+- OpenAI: prefix caching for 50% savings
+- Token tracking per call (input, output, cached, estimated USD cost)
+- Auto-retry with exponential backoff
+
+### Vanilla Learning System (opt-in)
+
+Teaches your project to learn from user interactions:
+- **Feedback Tracker** -- Accept/reject/modify/rate signals per agent
+- **Agent Trust** -- EMA-based trust scores, used for routing
+- **Check-in Manager** -- Never adapts silently; asks permission first
+- **User Profile** -- Aggregates preferences into context bundles for LLM prompts
+- **RAG** -- ChromaDB vector search over preferences (in-memory fallback)
+- **Graduation** -- Promotes stable patterns to global profile across projects
+
+### Security (Baked In Everywhere)
+
+- SSRF protection on agent registration (blocks private IPs, non-http schemes)
+- Prompt injection defense (all external agent responses sanitized)
+- Input size limits on every endpoint
+- Rate limiting per client IP
+- HMAC-SHA256 webhook signature verification
+- API key auth with production enforcement
+- CORS restricted to configured origins
+
+### Deployment Infrastructure
+
+- **Dockerfile** -- Multi-stage build, non-root user, health check
+- **docker-compose.yml** -- App + Postgres, one command to run
+- **Kubernetes** -- Deployment, Service, HPA (auto-scale 2-10 pods), ConfigMap
 
 ### 14 AI Subagents (`.cursor/agents/`)
 
@@ -55,83 +125,46 @@ Every scaffolded project includes **39 files** out of the box:
 | **sql-pro** | Database optimization (conditional on persistence choice) |
 | **ux-researcher** | User workflow optimization (conditional on project type) |
 
-### Architecture Enforcement
+### Architecture Enforcement + Red Team
 
-```
-tests/test_architecture.py
+- `tests/test_architecture.py` -- Enforces dependency direction rules, file size limits
+- `scripts/red_team_check.py` -- Pre-commit hook: secrets, SQL injection, dangerous functions
 
-Enforces:
-- Dependency direction rules (lower layers cannot import from higher)
-- File size limits (warning at 500+ lines)
-- Root cleanliness (no stray files)
-- Core module existence
-```
+---
 
-Parameterized from your layer choices at init time. Passes on a fresh project with zero code written.
+## Configuration Options
 
-### Red Team Pre-Commit Hook
+| Option | Default | Description |
+|--------|---------|-------------|
+| `project_type` | `web-app` | `web-app`, `cli-tool`, `multi-agent`, `api-service` |
+| `llm_provider` | `anthropic` | `anthropic`, `openai`, `google`, `multi` |
+| `persistence` | `sqlite` | `sqlite`, `postgres`, `none` |
+| `include_evals` | `true` | Eval infrastructure |
+| `include_state_management` | `true` | Task tracker + progress notes |
+| `include_llm_client` | `true` | LLM client with prompt caching |
+| `include_api_gateway` | `true` | FastAPI gateway + external agent support |
+| `include_deployment` | `true` | Dockerfile, docker-compose, K8s manifests |
+| `include_learning` | `false` | Learning system (feedback, trust, preferences, RAG) |
 
-```
-scripts/red_team_check.py
+---
 
-Checks before every commit:
-- Hardcoded secrets (API keys, passwords, tokens)
-- SQL injection (f-strings in queries)
-- Dangerous functions (eval, exec, pickle)
-- Architecture violations (forbidden imports)
-- Data safety (DROP TABLE, DELETE without WHERE)
-- File size limits
-
-BLOCKING findings prevent the commit.
-```
-
-### Progressive Disclosure Knowledge Base
-
-```
-CLAUDE.md           -- Entry point for AI agents (~100 lines, links to docs/)
-docs/ARCHITECTURE.md -- Canonical layering rules with enforcement details
-docs/QUALITY_SCORE.md -- Per-domain quality grades
-docs/TESTING_STANDARDS.md -- Testing conventions and eval guide
-docs/INDEX.md        -- Registry of all documentation
-```
-
-### CI/CD Pipeline
-
-```
-.github/workflows/ci.yml
-
-Stages:
-1. P0 architecture tests (every commit)
-2. P0 critical tests
-3. P1 important tests
-4. Full suite with coverage
-5. Lint (Black, Ruff, Bandit)
-```
-
-### Makefile
+## Makefile
 
 ```bash
 make help          # Show all commands
 make test          # Run all tests
-make test-p0       # P0 critical tests only
 make test-arch     # Architecture enforcement
+make serve         # Start API gateway (dev mode with auto-reload)
+make serve-prod    # Start API gateway (production, 4 workers)
+make docker-build  # Build Docker image
+make docker-run    # Run with docker-compose
+make k8s-deploy    # Deploy to Kubernetes
 make red-team      # Run red team on all source files
 make lint          # Run linters
 make format        # Format code
 make doctor        # Full project health check
 make clean         # Remove caches
 ```
-
----
-
-## Project Types
-
-| Type | Command | Layers | Extras |
-|------|---------|--------|--------|
-| Web App | `--data project_type=web-app` | data, analysis, components | NiceGUI/FastAPI |
-| CLI Tool | `--data project_type=cli-tool` | data, logic | Typer |
-| Multi-Agent | `--data project_type=multi-agent` | data, analysis, orchestration, specialists, prompts | LLM client, evals |
-| API Service | `--data project_type=api-service` | data, service, routes | FastAPI |
 
 ---
 
@@ -144,57 +177,27 @@ aiscaffold/
 
   template/             # Copier template (generates project files)
     {{project_slug}}/
+      src/{{project_slug}}/
+        agents/         # Agent implementations (local + remote adapter + registry)
+        api/            # FastAPI gateway (routes, models, middleware)
+        harness/        # Session lifecycle (Item/Turn/Thread + Initializer/Worker)
+        llm/            # LLM client with prompt caching (Anthropic/OpenAI/Google)
+        orchestration/  # Round Table + Chat Orchestrator + Agent Router
+        security/       # Prompt guard, validators, SSRF protection
+        learning/       # Feedback, trust, preferences, RAG, graduation (opt-in)
+      deploy/k8s/       # Kubernetes manifests
       .cursor/agents/   # 14 subagent definitions
-      .cursor/rules/    # Example domain rule
-      .github/workflows/ # CI pipeline
       docs/             # Progressive disclosure docs
       tests/            # Architecture enforcement tests
       scripts/          # Red team pre-commit hook
-      ...               # Config files (pyproject.toml, Makefile, etc.)
+      evals/            # Eval infrastructure
 
   core/                 # Shared utilities (install via pip)
-    pyproject.toml      # Package config
     src_aiscaffold/     # Python package
       cli.py            # CLI: init, doctor, add, update
       task_tracker.py   # JSON-based task tracking
       progress_notes.py # Session progress logging
       eval_harness.py   # Evaluation infrastructure
-```
-
----
-
-## CLI (Optional)
-
-Install the core package for CLI access and shared utilities:
-
-```bash
-cd core && pip install -e .
-
-# Create new project
-aiscaffold init my-project
-
-# Check project health
-aiscaffold doctor
-
-# Add modules
-aiscaffold add evals        # Eval infrastructure
-aiscaffold add agent:my-bot # New subagent
-aiscaffold add layer:api    # New architecture layer
-
-# Pull template updates
-aiscaffold update
-```
-
----
-
-## Updating Existing Projects
-
-```bash
-# When the template improves, update your project:
-copier update --trust
-
-# Copier stores your answers in .copier-answers.yml
-# It merges changes without re-asking questions
 ```
 
 ---

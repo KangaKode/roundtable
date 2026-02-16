@@ -8,11 +8,32 @@
 
 | Document | Purpose |
 |----------|---------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Layering rules, dependency directions |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Layering rules, module descriptions, state management, design decisions |
 | [TESTING_STANDARDS.md](TESTING_STANDARDS.md) | Testing conventions, markers, eval infrastructure |
 | [QUALITY_SCORE.md](QUALITY_SCORE.md) | Per-domain quality grades |
 | [AI_ENGINEERING_BEST_PRACTICES_2026.md](AI_ENGINEERING_BEST_PRACTICES_2026.md) | 2026 AI engineering patterns -- all agents reference this |
 | [EVAL_SCALING_GUIDE.md](EVAL_SCALING_GUIDE.md) | Scaling evals from 20 to 50+, graduation pattern, extended thinking |
+
+---
+
+## System References
+
+| System | Entry Point | API Docs |
+|--------|-------------|----------|
+{% if include_api_gateway -%}
+| API Gateway | `src/{{ project_slug }}/api/gateway.py` | http://localhost:8000/docs |
+{% endif -%}
+| Round Table | `src/{{ project_slug }}/orchestration/round_table.py` | {% if include_api_gateway %}`POST /api/v1/round-table/tasks`{% else %}In-process only{% endif %} |
+| Chat Orchestrator | `src/{{ project_slug }}/orchestration/chat_orchestrator.py` | {% if include_api_gateway %}`POST /api/v1/chat`{% else %}In-process only{% endif %} |
+| Agent Registry | `src/{{ project_slug }}/agents/registry.py` | {% if include_api_gateway %}`/api/v1/agents`{% else %}In-process only{% endif %} |
+| LLM Client | `src/{{ project_slug }}/llm/client.py` | In-process only |
+| Security | `src/{{ project_slug }}/security/` | N/A (wired into all modules) |
+{% if include_learning -%}
+| Feedback Tracker | `src/{{ project_slug }}/learning/feedback_tracker.py` | {% if include_api_gateway %}`/api/v1/feedback`{% else %}In-process only{% endif %} |
+| Preferences | `src/{{ project_slug }}/learning/user_profile.py` | {% if include_api_gateway %}`/api/v1/preferences`{% else %}In-process only{% endif %} |
+| Check-ins | `src/{{ project_slug }}/learning/checkin_manager.py` | {% if include_api_gateway %}`/api/v1/checkins`{% else %}In-process only{% endif %} |
+{% endif -%}
+| Session Lifecycle | `src/{{ project_slug }}/harness/session.py` | {% if include_api_gateway %}`/api/v1/sessions`{% else %}In-process only{% endif %} |
 
 ---
 
@@ -21,17 +42,10 @@
 <!-- Add as you create them -->
 <!-- | Feature | Document | Status | -->
 <!-- |---------|----------|--------| -->
-<!-- | Feature A | [ARCHITECTURE_MAP_A.md](ARCHITECTURE_MAP_A.md) | Complete | -->
 
 ---
 
 ## Data Flow Diagrams
-
-<!-- Add as you create them -->
-
----
-
-## Wireframes
 
 <!-- Add as you create them -->
 

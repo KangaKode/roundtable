@@ -3,7 +3,8 @@
 # Testing
 pytest>=8.0
 pytest-cov>=5.0
-{% if project_type == 'multi-agent' %}pytest-asyncio>=0.23{% endif %}
+{% if project_type == 'multi-agent' or include_api_gateway %}pytest-asyncio>=0.23{% endif %}
+{% if include_api_gateway %}httpx>=0.27{% endif %}
 
 # Code Quality
 black>=24.0
@@ -37,6 +38,20 @@ rich>=13.0
 # API Framework
 fastapi>=0.115
 uvicorn>=0.32
+{% endif -%}
+
+{% if include_api_gateway -%}
+# API Gateway (external agent support)
+fastapi>=0.115
+uvicorn>=0.32
+httpx>=0.27
+pydantic>=2.0
+{% endif -%}
+
+{% if include_learning -%}
+# Learning System (RAG / Vector Search)
+# chromadb>=0.5  # Uncomment for persistent vector search (optional)
+# sentence-transformers>=3.0  # Uncomment for local embeddings (optional)
 {% endif -%}
 
 {% if persistence == 'postgres' -%}

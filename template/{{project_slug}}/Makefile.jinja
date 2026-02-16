@@ -81,6 +81,60 @@ check: ## Verify environment setup
 install: ## Install dependencies
 	pip install -r requirements.txt
 
+{% if include_api_gateway -%}
+# =============================================================================
+# API GATEWAY
+# =============================================================================
+
+serve: ## Start the API gateway (development mode with auto-reload)
+	uvicorn src.{{ project_slug }}.api.gateway:app --reload --host 0.0.0.0 --port 8000
+
+serve-prod: ## Start the API gateway (production mode)
+	uvicorn src.{{ project_slug }}.api.gateway:app --host 0.0.0.0 --port 8000 --workers 4
+{% endif %}
+
+{% if include_deployment -%}
+# =============================================================================
+# DOCKER
+# =============================================================================
+
+docker-build: ## Build Docker image
+	docker build -t {{ project_slug }}:latest .
+
+docker-run: ## Run with docker-compose
+	docker-compose up
+
+docker-run-d: ## Run with docker-compose (background)
+	docker-compose up -d
+
+docker-stop: ## Stop docker-compose services
+	docker-compose down
+
+docker-test: ## Run tests inside Docker container
+	docker-compose run --rm app make test
+
+docker-logs: ## Follow application logs
+	docker-compose logs -f app
+
+# =============================================================================
+# KUBERNETES
+# =============================================================================
+
+k8s-deploy: ## Deploy to Kubernetes
+	kubectl apply -f deploy/k8s/
+
+k8s-status: ## Check deployment status
+	kubectl get pods -l app={{ project_slug }}
+	@echo ""
+	kubectl get svc {{ project_slug }}
+
+k8s-logs: ## Follow pod logs
+	kubectl logs -f -l app={{ project_slug }}
+
+k8s-delete: ## Remove from Kubernetes
+	kubectl delete -f deploy/k8s/
+{% endif %}
+
 clean: ## Remove caches and generated files
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true

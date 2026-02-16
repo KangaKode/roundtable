@@ -4,13 +4,17 @@ Example Agent - Shows how to implement AgentProtocol for the Round Table.
 Copy this file and customize for your project's specialist agents.
 Each agent needs: name, domain, analyze(), challenge(), vote().
 
+Uses CacheablePrompt so the system instructions (agent role, evidence rules)
+are cached across calls -- saving ~90% on input tokens for the stable prefix.
+
 Reference: src/orchestration/round_table.py
+Reference: src/llm/client.py (CacheablePrompt)
 """
 
 import json
 import logging
-from dataclasses import field
 
+from ..llm import CacheablePrompt
 from ..orchestration.round_table import (
     AgentAnalysis,
     AgentChallenge,
@@ -44,6 +48,18 @@ class ExampleAgent:
     def domain(self) -> str:
         return "general analysis"
 
+    def _system_prompt(self) -> str:
+        """Stable system prompt (cached across calls for token savings)."""
+        return (
+            f"You are a {self.domain} specialist.\n\n"
+            f"For EACH finding, you MUST provide:\n"
+            f"- finding: what you observed\n"
+            f"- evidence: specific quote or data supporting your finding\n"
+            f"- severity: critical / warning / info\n"
+            f"- confidence: 0.0 to 1.0\n\n"
+            f"Always return valid JSON."
+        )
+
     async def analyze(self, task: RoundTableTask) -> AgentAnalysis:
         """Phase 1: Independent analysis. Cite evidence for every finding."""
         if not self._llm:
@@ -58,15 +74,12 @@ class ExampleAgent:
                 }],
             )
 
-        prompt = (
-            f"You are a {self.domain} specialist.\n\n"
-            f"Analyze the following:\n{task.content}\n\n"
-            f"For EACH finding, you MUST provide:\n"
-            f"- finding: what you observed\n"
-            f"- evidence: specific quote or data supporting your finding\n"
-            f"- severity: critical / warning / info\n"
-            f"- confidence: 0.0 to 1.0\n\n"
-            f'Return JSON: {{"observations": [...], "recommendations": [...]}}'
+        prompt = CacheablePrompt(
+            system=self._system_prompt(),
+            user_message=(
+                f"Analyze the following:\n{task.content}\n\n"
+                f'Return JSON: {{"observations": [...], "recommendations": [...]}}'
+            ),
         )
 
         response = await self._llm.call(prompt=prompt, role="specialist")
