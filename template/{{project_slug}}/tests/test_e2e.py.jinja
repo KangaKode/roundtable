@@ -10,13 +10,13 @@ from src.{{ project_slug }}.orchestration.round_table import RoundTableConfig
 
 
 @pytest.fixture
-async def e2e_client(mock_agents, mock_llm):
+async def e2e_client(mock_agents, mock_llm, tmp_path):
     """E2E client with pre-registered mock agents and LLM."""
     import os
     os.environ.pop("API_KEY", None)
     os.environ.pop("ENV", None)
 
-    registry = AgentRegistry(persist_path="/tmp/e2e_agents.json")
+    registry = AgentRegistry(persist_path=tmp_path / "e2e_agents.json")
     for agent in mock_agents:
         registry.register_local(agent, capabilities=["testing"])
 

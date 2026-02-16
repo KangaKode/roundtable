@@ -1,0 +1,261 @@
+"""Tests for session lifecycle: Item, Turn, Thread, SessionProtocol."""
+
+import json
+import pytest
+from pathlib import Path
+
+from src.{{ project_slug }}.harness.session import (
+    Item,
+    SessionProtocol,
+    Thread,
+    Turn,
+)
+
+
+# =============================================================================
+# ITEM
+# =============================================================================
+
+
+class TestItem:
+    def test_creation(self):
+        item = Item(id="item_1", type="message", content="Hello")
+        assert item.id == "item_1"
+        assert item.type == "message"
+        assert item.content == "Hello"
+        assert item.status == "started"
+
+    def test_complete_without_result(self):
+        item = Item(id="item_1", type="message", content="original")
+        item.complete()
+        assert item.status == "completed"
+        assert item.content == "original"
+
+    def test_complete_with_result(self):
+        item = Item(id="item_1", type="tool_call", content="pending")
+        item.complete(result="done")
+        assert item.status == "completed"
+        assert item.content == "done"
+
+    def test_metadata_default_empty(self):
+        item = Item(id="item_1", type="message", content="test")
+        assert item.metadata == {}
+
+    def test_timestamp_auto_populated(self):
+        item = Item(id="item_1", type="message", content="test")
+        assert item.timestamp
+
+
+# =============================================================================
+# TURN
+# =============================================================================
+
+
+class TestTurn:
+    def test_creation(self):
+        turn = Turn(id="turn_1")
+        assert turn.id == "turn_1"
+        assert turn.items == []
+        assert turn.is_complete is False
+
+    def test_add_item(self):
+        turn = Turn(id="turn_1")
+        item = Item(id="item_1", type="message", content="Hello")
+        turn.add_item(item)
+        assert len(turn.items) == 1
+        assert turn.items[0].id == "item_1"
+
+    def test_complete(self):
+        turn = Turn(id="turn_1")
+        assert turn.completed_at is None
+        turn.complete()
+        assert turn.completed_at is not None
+        assert turn.is_complete is True
+
+    def test_requires_approval_default_false(self):
+        turn = Turn(id="turn_1")
+        assert turn.requires_approval is False
+
+
+# =============================================================================
+# THREAD
+# =============================================================================
+
+
+class TestThread:
+    def test_creation(self):
+        thread = Thread(id="thread_1")
+        assert thread.id == "thread_1"
+        assert thread.turns == []
+        assert thread.status == "active"
+
+    def test_add_turn(self):
+        thread = Thread(id="thread_1")
+        turn = Turn(id="turn_1")
+        thread.add_turn(turn)
+        assert len(thread.turns) == 1
+
+    def test_fork(self):
+        thread = Thread(id="thread_1", metadata={"key": "val"})
+        turn = Turn(id="turn_1")
+        turn.add_item(Item(id="i1", type="message", content="test"))
+        thread.add_turn(turn)
+
+        forked = thread.fork("thread_2")
+        assert forked.id == "thread_2"
+        assert forked.metadata["forked_from"] == "thread_1"
+        assert "forked_at" in forked.metadata
+        assert len(forked.turns) == 1
+
+        thread.add_turn(Turn(id="turn_2"))
+        assert len(forked.turns) == 1
+
+    def test_archive(self):
+        thread = Thread(id="thread_1")
+        assert thread.status == "active"
+        thread.archive()
+        assert thread.status == "archived"
+
+    def test_save_and_load(self, tmp_path):
+        thread = Thread(id="thread_1", metadata={"project": "test"})
+        turn = Turn(id="turn_1")
+        turn.add_item(Item(id="i1", type="message", content="hello"))
+        turn.add_item(Item(id="i2", type="tool_call", content="run_test", status="completed"))
+        turn.complete()
+        thread.add_turn(turn)
+
+        save_path = tmp_path / "sessions" / "thread_1.json"
+        thread.save(save_path)
+
+        assert save_path.exists()
+        loaded = Thread.load(save_path)
+        assert loaded.id == "thread_1"
+        assert loaded.metadata["project"] == "test"
+        assert len(loaded.turns) == 1
+        assert len(loaded.turns[0].items) == 2
+        assert loaded.turns[0].items[0].content == "hello"
+        assert loaded.turns[0].completed_at is not None
+
+    def test_save_creates_parent_dirs(self, tmp_path):
+        thread = Thread(id="t1")
+        deep_path = tmp_path / "a" / "b" / "c" / "thread.json"
+        thread.save(deep_path)
+        assert deep_path.exists()
+
+    def test_load_preserves_item_fields(self, tmp_path):
+        data = {
+            "id": "t1",
+            "turns": [{
+                "id": "turn_1",
+                "started_at": "2026-01-01T00:00:00",
+                "completed_at": None,
+                "items": [{
+                    "id": "i1",
+                    "type": "result",
+                    "content": "test output",
+                    "status": "completed",
+                    "timestamp": "2026-01-01T00:00:01",
+                }],
+            }],
+            "metadata": {},
+            "created_at": "2026-01-01T00:00:00",
+            "status": "active",
+        }
+        path = tmp_path / "thread.json"
+        with open(path, "w") as f:
+            json.dump(data, f)
+
+        loaded = Thread.load(path)
+        assert loaded.turns[0].items[0].type == "result"
+        assert loaded.turns[0].items[0].status == "completed"
+
+
+# =============================================================================
+# SESSION PROTOCOL
+# =============================================================================
+
+
+class TestSessionProtocol:
+    def test_thread_auto_created(self, tmp_path):
+        session = SessionProtocol(work_dir=tmp_path)
+        thread = session.thread
+        assert thread.id.startswith("session_")
+
+    def test_thread_stable_reference(self, tmp_path):
+        session = SessionProtocol(work_dir=tmp_path)
+        assert session.thread is session.thread
+
+    @pytest.mark.asyncio
+    async def test_run_first_run(self, tmp_path):
+        initialized = []
+
+        class MySession(SessionProtocol):
+            async def initialize(self):
+                initialized.append(True)
+
+            async def work(self):
+                pass
+
+        session = MySession(work_dir=tmp_path, is_first_run=True)
+        await session.run()
+        assert len(initialized) == 1
+
+    @pytest.mark.asyncio
+    async def test_run_normal(self, tmp_path):
+        initialized = []
+        worked = []
+
+        class MySession(SessionProtocol):
+            async def initialize(self):
+                initialized.append(True)
+
+            async def work(self):
+                worked.append(True)
+
+        session = MySession(work_dir=tmp_path, is_first_run=False)
+        await session.run()
+        assert len(initialized) == 0
+        assert len(worked) == 1
+
+    @pytest.mark.asyncio
+    async def test_health_check_abort(self, tmp_path):
+        worked = []
+
+        class UnhealthySession(SessionProtocol):
+            async def health_check(self):
+                return False
+
+            async def work(self):
+                worked.append(True)
+
+        session = UnhealthySession(work_dir=tmp_path)
+        await session.run()
+        assert len(worked) == 0
+
+    @pytest.mark.asyncio
+    async def test_cleanup_runs_on_failure(self, tmp_path):
+        cleaned = []
+
+        class FailingSession(SessionProtocol):
+            async def work(self):
+                raise ValueError("deliberate error")
+
+            async def cleanup(self):
+                cleaned.append(True)
+
+        session = FailingSession(work_dir=tmp_path)
+        with pytest.raises(ValueError, match="deliberate error"):
+            await session.run()
+        assert len(cleaned) == 1
+
+    def test_queue_feedback(self, tmp_path):
+        session = SessionProtocol(work_dir=tmp_path)
+        session.queue_feedback({"type": "accept"})
+        session.queue_feedback({"type": "reject"})
+        assert len(session._pending_feedback) == 2
+
+    @pytest.mark.asyncio
+    async def test_work_not_implemented(self, tmp_path):
+        session = SessionProtocol(work_dir=tmp_path)
+        with pytest.raises(NotImplementedError):
+            await session.work()

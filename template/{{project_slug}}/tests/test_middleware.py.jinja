@@ -1,0 +1,225 @@
+{% if include_api_gateway -%}
+"""Tests for API middleware: authentication and rate limiting."""
+
+import os
+import time
+
+import pytest
+from unittest.mock import MagicMock
+
+from src.{{ project_slug }}.api.middleware.auth import (
+    check_production_auth,
+    get_api_key,
+    verify_api_key,
+)
+from src.{{ project_slug }}.api.middleware.rate_limit import (
+    MAX_TRACKED_IPS,
+    _cleanup_old_entries,
+    _global_cleanup,
+    _request_log,
+    check_rate_limit,
+)
+
+
+# =============================================================================
+# AUTH: get_api_key
+# =============================================================================
+
+
+class TestGetApiKey:
+    def test_returns_key_when_set(self, monkeypatch):
+        monkeypatch.setenv("API_KEY", "test-key-123")
+        assert get_api_key() == "test-key-123"
+
+    def test_returns_none_when_empty(self, monkeypatch):
+        monkeypatch.delenv("API_KEY", raising=False)
+        assert get_api_key() is None
+
+    def test_returns_none_when_whitespace(self, monkeypatch):
+        monkeypatch.setenv("API_KEY", "   ")
+        assert get_api_key() is None
+
+
+# =============================================================================
+# AUTH: check_production_auth
+# =============================================================================
+
+
+class TestProductionAuth:
+    def test_production_without_key_raises(self, monkeypatch):
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.delenv("API_KEY", raising=False)
+        monkeypatch.delenv("AUTH_DISABLED", raising=False)
+        with pytest.raises(RuntimeError, match="API_KEY is required"):
+            check_production_auth()
+
+    def test_production_with_key_ok(self, monkeypatch):
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.setenv("API_KEY", "my-key")
+        check_production_auth()
+
+    def test_production_auth_disabled_ok(self, monkeypatch):
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.delenv("API_KEY", raising=False)
+        monkeypatch.setenv("AUTH_DISABLED", "true")
+        check_production_auth()
+
+    def test_dev_without_key_ok(self, monkeypatch):
+        monkeypatch.setenv("ENV", "development")
+        monkeypatch.delenv("API_KEY", raising=False)
+        check_production_auth()
+
+
+# =============================================================================
+# AUTH: verify_api_key
+# =============================================================================
+
+
+class TestVerifyApiKey:
+    @pytest.mark.asyncio
+    async def test_no_key_configured_returns_none(self, monkeypatch):
+        monkeypatch.delenv("API_KEY", raising=False)
+        request = MagicMock()
+        result = await verify_api_key(request, credentials=None)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_missing_credentials_raises_401(self, monkeypatch):
+        from fastapi import HTTPException
+        monkeypatch.setenv("API_KEY", "test-key")
+        request = MagicMock()
+        request.client = MagicMock(host="127.0.0.1")
+        with pytest.raises(HTTPException) as exc_info:
+            await verify_api_key(request, credentials=None)
+        assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_wrong_key_raises_403(self, monkeypatch):
+        from fastapi import HTTPException
+        from fastapi.security import HTTPAuthorizationCredentials
+        monkeypatch.setenv("API_KEY", "correct-key")
+        request = MagicMock()
+        request.client = MagicMock(host="127.0.0.1")
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="wrong-key")
+        with pytest.raises(HTTPException) as exc_info:
+            await verify_api_key(request, credentials=creds)
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_correct_key_returns_key(self, monkeypatch):
+        from fastapi.security import HTTPAuthorizationCredentials
+        monkeypatch.setenv("API_KEY", "correct-key")
+        request = MagicMock()
+        request.client = MagicMock(host="127.0.0.1")
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="correct-key")
+        result = await verify_api_key(request, credentials=creds)
+        assert result == "correct-key"
+
+    @pytest.mark.asyncio
+    async def test_none_client_does_not_crash(self, monkeypatch):
+        from fastapi import HTTPException
+        monkeypatch.setenv("API_KEY", "test-key")
+        request = MagicMock()
+        request.client = None
+        with pytest.raises(HTTPException) as exc_info:
+            await verify_api_key(request, credentials=None)
+        assert exc_info.value.status_code == 401
+
+
+# =============================================================================
+# RATE LIMIT: cleanup
+# =============================================================================
+
+
+class TestRateLimitCleanup:
+    def setup_method(self):
+        _request_log.clear()
+
+    def test_cleanup_removes_old_entries(self):
+        now = time.time()
+        _request_log["192.168.1.1"] = [now - 120, now - 90, now - 30, now - 5]
+        _cleanup_old_entries("192.168.1.1", window_seconds=60.0)
+        assert len(_request_log["192.168.1.1"]) == 2
+
+    def test_global_cleanup_removes_empty_entries(self):
+        import src.{{ project_slug }}.api.middleware.rate_limit as rl_mod
+        old_ts = rl_mod._last_global_cleanup
+        rl_mod._last_global_cleanup = 0.0
+        try:
+            _request_log["stale_ip"] = [time.time() - 120]
+            _request_log["active_ip"] = [time.time()]
+            _global_cleanup(window_seconds=60.0)
+            assert "stale_ip" not in _request_log
+            assert "active_ip" in _request_log
+        finally:
+            rl_mod._last_global_cleanup = old_ts
+
+    def test_global_cleanup_respects_interval(self):
+        import src.{{ project_slug }}.api.middleware.rate_limit as rl_mod
+        rl_mod._last_global_cleanup = time.time()
+        _request_log["stale_ip"] = [time.time() - 120]
+        _global_cleanup(window_seconds=60.0)
+        assert "stale_ip" in _request_log
+
+
+# =============================================================================
+# RATE LIMIT: check_rate_limit
+# =============================================================================
+
+
+class TestCheckRateLimit:
+    def setup_method(self):
+        _request_log.clear()
+
+    @pytest.mark.asyncio
+    async def test_allows_under_limit(self, monkeypatch):
+        monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "10")
+        import src.{{ project_slug }}.api.middleware.rate_limit as rl_mod
+        rl_mod._last_global_cleanup = 0.0
+        request = MagicMock()
+        request.client = MagicMock(host="10.0.0.1")
+        await check_rate_limit(request)
+        assert len(_request_log["10.0.0.1"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_rejects_over_limit(self, monkeypatch):
+        from fastapi import HTTPException
+        monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "2")
+        import src.{{ project_slug }}.api.middleware.rate_limit as rl_mod
+        rl_mod._last_global_cleanup = 0.0
+        request = MagicMock()
+        request.client = MagicMock(host="10.0.0.2")
+        now = time.time()
+        _request_log["10.0.0.2"] = [now - 5, now - 3]
+        with pytest.raises(HTTPException) as exc_info:
+            await check_rate_limit(request)
+        assert exc_info.value.status_code == 429
+
+    @pytest.mark.asyncio
+    async def test_503_when_table_full(self, monkeypatch):
+        from fastapi import HTTPException
+        import src.{{ project_slug }}.api.middleware.rate_limit as rl_mod
+        rl_mod._last_global_cleanup = time.time()
+        now = time.time()
+        for i in range(MAX_TRACKED_IPS):
+            _request_log[f"ip_{i}"] = [now]
+        request = MagicMock()
+        request.client = MagicMock(host="new_client")
+        with pytest.raises(HTTPException) as exc_info:
+            await check_rate_limit(request)
+        assert exc_info.value.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_none_client_uses_unknown(self, monkeypatch):
+        monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "100")
+        import src.{{ project_slug }}.api.middleware.rate_limit as rl_mod
+        rl_mod._last_global_cleanup = 0.0
+        request = MagicMock()
+        request.client = None
+        await check_rate_limit(request)
+        assert "unknown" in _request_log
+
+
+{% else -%}
+# Middleware tests skipped: include_api_gateway is false
+{% endif -%}
