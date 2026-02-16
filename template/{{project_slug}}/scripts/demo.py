@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""
+Demo - Run a mock round table to see the protocol in action.
+
+Usage: python scripts/demo.py
+       make demo
+
+No API keys required -- uses mock agents for demonstration.
+"""
+
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+class MockAgent:
+    """Simple mock agent for demonstration."""
+
+    def __init__(self, agent_name: str, agent_domain: str):
+        self._name = agent_name
+        self._domain = agent_domain
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def domain(self) -> str:
+        return self._domain
+
+    async def analyze(self, task):
+        from src.orchestration.round_table import AgentAnalysis  # type: ignore
+
+        return AgentAnalysis(
+            agent_name=self.name,
+            domain=self.domain,
+            observations=[
+                {
+                    "finding": f"{self.name} found an issue in the {self.domain} area",
+                    "evidence": f"Based on analysis of the input content",
+                    "severity": "warning",
+                    "confidence": 0.8,
+                }
+            ],
+            recommendations=[
+                {"action": f"Address the {self.domain} concern", "rationale": "Evidence-based", "priority": "medium"}
+            ],
+            confidence=0.8,
+        )
+
+    async def challenge(self, task, other_analyses):
+        from src.orchestration.round_table import AgentChallenge  # type: ignore
+
+        return AgentChallenge(agent_name=self.name)
+
+    async def vote(self, task, synthesis):
+        from src.orchestration.round_table import AgentVote  # type: ignore
+
+        return AgentVote(agent_name=self.name, approve=True)
+
+
+async def main():
+    from src.orchestration.round_table import RoundTable, RoundTableConfig, RoundTableTask  # type: ignore
+
+    print("\n" + "=" * 60)
+    print("  ROUND TABLE DEMO")
+    print("  4-Phase Multi-Agent Protocol")
+    print("=" * 60 + "\n")
+
+    # Create mock agents
+    agents = [
+        MockAgent("analyst", "data analysis"),
+        MockAgent("reviewer", "quality review"),
+        MockAgent("security_checker", "security assessment"),
+    ]
+
+    # Configure (no LLM needed for demo -- strategy phase disabled)
+    config = RoundTableConfig(
+        enable_strategy_phase=False,  # Requires LLM
+        enable_challenge_phase=True,
+        consensus_threshold=0.7,
+        write_artifacts=True,
+        artifacts_dir=Path(".aiscaffold/demo_artifacts"),
+    )
+
+    # Create round table
+    rt = RoundTable(agents=agents, config=config)
+
+    # Create task
+    task = RoundTableTask(
+        id="demo_001",
+        content="Analyze this sample text for quality, accuracy, and security.",
+        constraints=["Must cite evidence", "Must include confidence scores"],
+    )
+
+    # Run!
+    print(f"Task: {task.content}")
+    print(f"Agents: {', '.join(a.name for a in agents)}")
+    print(f"Phases: {'Strategy, ' if config.enable_strategy_phase else ''}Independent, Challenge, Synthesis+Voting\n")
+
+    result = await rt.run(task)
+
+    # Print results
+    print(f"\n{'=' * 60}")
+    print(f"  RESULTS")
+    print(f"{'=' * 60}\n")
+
+    print(f"  Consensus: {'YES' if result.consensus_reached else 'NO'} ({result.approval_rate:.0%} approval)")
+    print(f"  Duration: {result.duration_seconds:.2f}s")
+    print(f"  Analyses: {len(result.analyses)}")
+    print(f"  Challenges: {len(result.challenges)}")
+    print(f"  Votes: {len(result.votes)}")
+
+    if result.analyses:
+        print(f"\n  Findings:")
+        for analysis in result.analyses:
+            for obs in analysis.observations:
+                print(f"    [{obs['severity'].upper()}] {analysis.agent_name}: {obs['finding']}")
+
+    print(f"\n  Artifacts written to: {config.artifacts_dir}/")
+    print(f"\n{'=' * 60}\n")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""
+Setup Check - Verify environment is correctly configured.
+
+Usage: python scripts/setup_check.py
+       make check
+
+Verifies: Python version, dependencies, env vars, directory structure.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+GREEN = "\033[92m"
+RED = "\033[91m"
+YELLOW = "\033[93m"
+RESET = "\033[0m"
+
+checks_passed = 0
+checks_failed = 0
+checks_warned = 0
+
+
+def check(name: str, condition: bool, fix: str = ""):
+    global checks_passed, checks_failed
+    if condition:
+        print(f"  {GREEN}PASS{RESET}  {name}")
+        checks_passed += 1
+    else:
+        print(f"  {RED}FAIL{RESET}  {name}")
+        if fix:
+            print(f"        FIX: {fix}")
+        checks_failed += 1
+
+
+def warn(name: str, condition: bool, note: str = ""):
+    global checks_warned
+    if not condition:
+        print(f"  {YELLOW}WARN{RESET}  {name}")
+        if note:
+            print(f"        NOTE: {note}")
+        checks_warned += 1
+
+
+def main():
+    print("\nSetup Check\n")
+
+    # Python version
+    v = sys.version_info
+    check(
+        f"Python {v.major}.{v.minor}.{v.micro}",
+        v.major == 3 and v.minor >= 12,
+        "Python 3.12+ required",
+    )
+
+    # Required directories
+    root = Path(__file__).parent.parent
+    for d in ["src", "tests", "docs", "evals", "scripts", ".cursor/agents"]:
+        check(f"Directory: {d}/", (root / d).is_dir(), f"mkdir -p {d}")
+
+    # Required files
+    for f in ["CLAUDE.md", "pyproject.toml", ".gitignore"]:
+        check(f"File: {f}", (root / f).is_file(), f"Missing {f}")
+
+    # Environment variables
+    print()
+    anthropic = os.getenv("ANTHROPIC_API_KEY")
+    check(
+        "ANTHROPIC_API_KEY set",
+        bool(anthropic),
+        "Set in .env file: ANTHROPIC_API_KEY=sk-ant-...",
+    )
+
+    warn(
+        "GOOGLE_API_KEY set (optional fallback)",
+        bool(os.getenv("GOOGLE_API_KEY")),
+        "Optional: set for Gemini fallback provider",
+    )
+
+    # Dependencies
+    print()
+    try:
+        import pytest
+
+        check("pytest installed", True)
+    except ImportError:
+        check("pytest installed", False, "pip install pytest")
+
+    try:
+        import anthropic
+
+        check("anthropic SDK installed", True)
+    except ImportError:
+        check("anthropic SDK installed", False, "pip install anthropic")
+
+    # Summary
+    print(f"\n{'=' * 40}")
+    print(f"  {GREEN}{checks_passed} passed{RESET}, ", end="")
+    if checks_failed:
+        print(f"{RED}{checks_failed} failed{RESET}, ", end="")
+    if checks_warned:
+        print(f"{YELLOW}{checks_warned} warnings{RESET}", end="")
+    print()
+    print(f"{'=' * 40}\n")
+
+    sys.exit(1 if checks_failed else 0)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,8 +1,14 @@
-# aiscaffold
+# aiscaffold v2
 
-**AI Project Scaffold with 2026 Best Practices**
+**Gold Standard AI Agent Project Scaffold -- Secure, Accurate, Human-in-the-Loop**
 
-One command to set up a new AI tool project with everything the experts recommend: progressive disclosure docs, architecture enforcement tests, 14 subagents, red team pre-commit hooks, CI/CD, eval infrastructure, and quality tracking.
+One command to set up a new AI agent project with everything built in: 4-phase round table protocol, 20 eval tasks, prompt injection defense, session lifecycle management, 15 subagents, architecture enforcement, and quality tracking.
+
+Every project scaffolded by aiscaffold v2 is designed to be:
+- **Secure** -- prompt injection defense, input validation, secrets management from day 1
+- **Hallucination-resistant** -- evidence requirements in every agent prompt, fact-grounding patterns
+- **Accurate** -- 20 eval tasks that catch drift, regression suites, model-based graders
+- **Human-in-the-loop** -- approval gates in round table, session health checks, confirmation before adaptation
 
 ---
 

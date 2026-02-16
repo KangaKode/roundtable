@@ -1,0 +1,235 @@
+"""
+Session Lifecycle Management - Item/Turn/Thread + Initializer/Worker.
+
+Implements the agent session protocol from 2026 best practices:
+
+  Item  -- Atomic unit of I/O (message, tool call, approval request)
+  Turn  -- One unit of agent work initiated by user input
+  Thread -- Durable container for an ongoing session
+
+Initializer/Worker Pattern:
+  FIRST RUN:  Initialize project, create task list, health check
+  EVERY RUN:  Startup ritual -> health check -> work -> cleanup ritual
+
+Human-in-the-loop gates:
+  - Health check must pass before work begins
+  - Cleanup requires clean state verification
+  - Approval requests pause the turn until human responds
+
+Reference: docs/AI_ENGINEERING_BEST_PRACTICES_2026.md (Parts 1, 3)
+
+Keep this file under 300 lines.
+"""
+
+import json
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# PRIMITIVES (OpenAI Item/Turn/Thread model)
+# =============================================================================
+
+
+@dataclass
+class Item:
+    """Atomic unit of agent I/O."""
+
+    id: str
+    type: str  # "message", "tool_call", "approval_request", "result"
+    content: str
+    status: str = "started"  # started -> delta -> completed
+    metadata: dict[str, Any] = field(default_factory=dict)
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def complete(self, result: str = "") -> None:
+        self.status = "completed"
+        if result:
+            self.content = result
+
+
+@dataclass
+class Turn:
+    """One unit of agent work initiated by user input."""
+
+    id: str
+    items: list[Item] = field(default_factory=list)
+    started_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    completed_at: str | None = None
+    requires_approval: bool = False  # Human-in-the-loop gate
+
+    def add_item(self, item: Item) -> None:
+        self.items.append(item)
+
+    def complete(self) -> None:
+        self.completed_at = datetime.now().isoformat()
+
+    @property
+    def is_complete(self) -> bool:
+        return self.completed_at is not None
+
+
+@dataclass
+class Thread:
+    """Durable container for an ongoing session. Can be saved, resumed, forked."""
+
+    id: str
+    turns: list[Turn] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    status: str = "active"  # active, paused, archived
+
+    def add_turn(self, turn: Turn) -> None:
+        self.turns.append(turn)
+
+    def fork(self, new_id: str) -> "Thread":
+        """Create a branch from this thread's current state."""
+        import copy
+
+        forked = copy.deepcopy(self)
+        forked.id = new_id
+        forked.metadata["forked_from"] = self.id
+        forked.metadata["forked_at"] = datetime.now().isoformat()
+        return forked
+
+    def archive(self) -> None:
+        self.status = "archived"
+
+    def save(self, path: Path) -> None:
+        """Persist thread to JSON."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "id": self.id,
+            "turns": [
+                {
+                    "id": t.id,
+                    "items": [{"id": i.id, "type": i.type, "content": i.content,
+                               "status": i.status, "timestamp": i.timestamp} for i in t.items],
+                    "started_at": t.started_at,
+                    "completed_at": t.completed_at,
+                }
+                for t in self.turns
+            ],
+            "metadata": self.metadata,
+            "created_at": self.created_at,
+            "status": self.status,
+        }
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+        logger.debug(f"[Thread] Saved to {path}")
+
+    @classmethod
+    def load(cls, path: Path) -> "Thread":
+        """Load thread from JSON."""
+        with open(path) as f:
+            data = json.load(f)
+        thread = cls(id=data["id"], metadata=data.get("metadata", {}),
+                     created_at=data.get("created_at", ""), status=data.get("status", "active"))
+        for t_data in data.get("turns", []):
+            turn = Turn(id=t_data["id"], started_at=t_data.get("started_at", ""),
+                        completed_at=t_data.get("completed_at"))
+            for i_data in t_data.get("items", []):
+                turn.add_item(Item(id=i_data["id"], type=i_data["type"],
+                                   content=i_data["content"], status=i_data.get("status", "completed"),
+                                   timestamp=i_data.get("timestamp", "")))
+            thread.add_turn(turn)
+        return thread
+
+
+# =============================================================================
+# SESSION PROTOCOL (Initializer/Worker pattern)
+# =============================================================================
+
+
+class SessionProtocol:
+    """
+    Base protocol for agent session lifecycle.
+
+    Initializer/Worker Pattern:
+      FIRST RUN:  self.initialize() -> create task list, project setup
+      EVERY RUN:  self.startup() -> self.health_check() -> self.work() -> self.cleanup()
+
+    Subclass and override for your project. The run() method enforces
+    the ritual ordering -- work() will NOT execute if health_check() fails.
+
+    Usage:
+        class MySession(SessionProtocol):
+            async def work(self):
+                # Your agent logic here
+                pass
+
+        session = MySession(work_dir=Path("."))
+        await session.run()
+    """
+
+    def __init__(self, work_dir: Path, is_first_run: bool = False):
+        self.work_dir = work_dir
+        self.is_first_run = is_first_run
+        self._thread: Thread | None = None
+        logger.info(f"[Session] Protocol initialized (first_run={is_first_run})")
+
+    @property
+    def thread(self) -> Thread:
+        if self._thread is None:
+            self._thread = Thread(id=f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        return self._thread
+
+    # =========================================================================
+    # OVERRIDE THESE IN YOUR PROJECT
+    # =========================================================================
+
+    async def initialize(self) -> None:
+        """FIRST RUN ONLY: Set up project structure, create initial task list."""
+        logger.info("[Session] Running first-run initialization")
+
+    async def startup(self) -> None:
+        """EVERY RUN: Read task list, progress notes, get up to speed."""
+        logger.info("[Session] Running startup ritual")
+
+    async def health_check(self) -> bool:
+        """Verify system is healthy before starting work. Return False to abort."""
+        logger.info("[Session] Running health check")
+        return True
+
+    async def work(self) -> None:
+        """Execute the highest-priority task. THIS IS YOUR MAIN LOGIC."""
+        raise NotImplementedError("Override work() with your agent logic")
+
+    async def cleanup(self) -> None:
+        """EVERY RUN: Update progress, commit state, leave clean."""
+        logger.info("[Session] Running cleanup ritual")
+
+    # =========================================================================
+    # DO NOT OVERRIDE -- ENFORCES RITUAL ORDERING
+    # =========================================================================
+
+    async def run(self) -> None:
+        """Execute the full session lifecycle. Do not override."""
+        # First run initialization
+        if self.is_first_run:
+            await self.initialize()
+
+        # Startup ritual
+        await self.startup()
+
+        # Health check gate (human-in-the-loop: won't proceed if unhealthy)
+        if not await self.health_check():
+            logger.error("[Session] Health check FAILED -- aborting session")
+            return
+
+        # Work
+        try:
+            await self.work()
+        except Exception as e:
+            logger.error(f"[Session] Work failed: {e}", exc_info=True)
+            raise
+        finally:
+            # Cleanup always runs (even on failure)
+            await self.cleanup()
+
+        logger.info("[Session] Session complete")
