@@ -46,6 +46,42 @@ class TestAgentRegistry:
         assert len(found) == 0
 
 
+class TestAgentVisibility:
+    def test_default_visibility_is_public(self, mock_agent, tmp_path):
+        registry = AgentRegistry(persist_path=tmp_path / "agents.json")
+        registry.register_local(mock_agent)
+        entry = registry.get_entry(mock_agent.name)
+        assert entry.visibility == "public"
+        assert entry.tenant_id == "default"
+
+    def test_list_for_tenant_returns_public_agents(self, mock_agents, tmp_path):
+        registry = AgentRegistry(persist_path=tmp_path / "agents.json")
+        for agent in mock_agents:
+            registry.register_local(agent)
+        visible = registry.list_for_tenant("any_tenant")
+        assert len(visible) == 2
+
+    def test_list_for_tenant_includes_same_tenant_team_agents(self, mock_agent, tmp_path):
+        registry = AgentRegistry(persist_path=tmp_path / "agents.json")
+        entry = registry._agents  # direct access for test setup
+        from src.{{project_slug}}.agents.registry import AgentEntry
+        entry[mock_agent.name] = AgentEntry(
+            agent=mock_agent, visibility="team", tenant_id="acme",
+        )
+        visible = registry.list_for_tenant("acme")
+        assert len(visible) == 1
+        assert visible[0].agent.name == mock_agent.name
+
+    def test_list_for_tenant_excludes_other_tenant_team_agents(self, mock_agent, tmp_path):
+        registry = AgentRegistry(persist_path=tmp_path / "agents.json")
+        from src.{{project_slug}}.agents.registry import AgentEntry
+        registry._agents[mock_agent.name] = AgentEntry(
+            agent=mock_agent, visibility="team", tenant_id="acme",
+        )
+        visible = registry.list_for_tenant("other_corp")
+        assert len(visible) == 0
+
+
 class TestRemoteAgent:
     def test_to_dict_uses_env_var_not_raw_key(self):
         agent = RemoteAgent(
