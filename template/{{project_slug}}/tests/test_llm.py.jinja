@@ -1,6 +1,9 @@
 """Unit tests for the LLM module -- client, json_parser, CacheablePrompt."""
 
+import asyncio
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+
 from src.{{project_slug}}.llm.client import CacheablePrompt, TokenUsage, LLMClient, LLMResponse
 from src.{{project_slug}}.llm.json_parser import extract_json, extract_json_or_raise
 
@@ -72,3 +75,186 @@ class TestLLMClient:
         client._total_usage.estimated_cost_usd = 0.01
         response = await client.call("test prompt")
         assert "Budget exhausted" in response.content or "not initialized" in response.content
+
+    @pytest.mark.asyncio
+    async def test_provider_property(self):
+        client = LLMClient(provider="anthropic", api_key="")
+        assert client.provider == "anthropic"
+
+    @pytest.mark.asyncio
+    async def test_model_property(self):
+        client = LLMClient(provider="anthropic", api_key="")
+        assert client.model is not None
+        assert isinstance(client.model, str)
+
+    @pytest.mark.asyncio
+    async def test_total_usage_property(self):
+        client = LLMClient(provider="anthropic", api_key="")
+        usage = client.total_usage
+        assert isinstance(usage, TokenUsage)
+        assert usage.total_tokens == 0
+
+
+class TestLLMClientProviderCalls:
+    """Test provider-specific call methods with injected mock clients."""
+
+    @pytest.mark.asyncio
+    async def test_call_anthropic_returns_response(self):
+        client = LLMClient(provider="anthropic", api_key="test-key")
+        mock_resp = MagicMock()
+        mock_resp.content = [MagicMock(text="Hello from Claude")]
+        mock_resp.usage = MagicMock(
+            input_tokens=15, output_tokens=8, cache_read_input_tokens=3
+        )
+        client._client = AsyncMock()
+        client._client.messages.create = AsyncMock(return_value=mock_resp)
+
+        prompt = CacheablePrompt(system="You are helpful", user_message="Hi")
+        response = await client.call(prompt)
+        assert response.content == "Hello from Claude"
+        assert response.usage.input_tokens == 15
+        assert response.usage.output_tokens == 8
+        assert response.usage.cached_input_tokens == 3
+        assert response.provider == "anthropic"
+
+    @pytest.mark.asyncio
+    async def test_call_anthropic_without_system(self):
+        client = LLMClient(provider="anthropic", api_key="test-key")
+        mock_resp = MagicMock()
+        mock_resp.content = [MagicMock(text="response")]
+        mock_resp.usage = MagicMock(
+            input_tokens=5, output_tokens=3, cache_read_input_tokens=0
+        )
+        client._client = AsyncMock()
+        client._client.messages.create = AsyncMock(return_value=mock_resp)
+
+        response = await client.call("simple prompt")
+        assert response.content == "response"
+
+    @pytest.mark.asyncio
+    async def test_call_openai_returns_response(self):
+        client = LLMClient(provider="openai", api_key="test-key")
+        mock_message = MagicMock()
+        mock_message.content = "Hello from GPT"
+        mock_choice = MagicMock()
+        mock_choice.message = mock_message
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        mock_resp.usage = MagicMock(
+            prompt_tokens=12, completion_tokens=6,
+            prompt_tokens_details=None,
+        )
+        client._client = AsyncMock()
+        client._client.chat.completions.create = AsyncMock(return_value=mock_resp)
+
+        prompt = CacheablePrompt(system="sys", context="ctx", user_message="msg")
+        response = await client.call(prompt)
+        assert response.content == "Hello from GPT"
+        assert response.usage.input_tokens == 12
+        assert response.usage.output_tokens == 6
+        assert response.provider == "openai"
+
+    @pytest.mark.asyncio
+    async def test_call_openai_with_cached_tokens(self):
+        client = LLMClient(provider="openai", api_key="test-key")
+        mock_message = MagicMock()
+        mock_message.content = "cached response"
+        mock_choice = MagicMock()
+        mock_choice.message = mock_message
+        cached_details = MagicMock()
+        cached_details.cached_tokens = 8
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        mock_resp.usage = MagicMock(
+            prompt_tokens=20, completion_tokens=10,
+            prompt_tokens_details=cached_details,
+        )
+        client._client = AsyncMock()
+        client._client.chat.completions.create = AsyncMock(return_value=mock_resp)
+
+        response = await client.call("test")
+        assert response.usage.cached_input_tokens == 8
+
+    @pytest.mark.asyncio
+    async def test_call_google_returns_response(self):
+        client = LLMClient(provider="google", api_key="test-key")
+        mock_resp = MagicMock()
+        mock_resp.text = "Hello from Gemini"
+        mock_resp.usage_metadata = MagicMock(
+            prompt_token_count=10, candidates_token_count=5
+        )
+        client._client = MagicMock()
+        client._client.generate_content = MagicMock(return_value=mock_resp)
+
+        response = await client.call("test prompt")
+        assert response.content == "Hello from Gemini"
+        assert response.provider == "google"
+
+
+class TestLLMClientRetryAndErrors:
+    """Test retry logic and error handling paths."""
+
+    @pytest.mark.asyncio
+    async def test_retry_on_transient_error_then_success(self):
+        client = LLMClient(provider="anthropic", api_key="test-key", max_retries=2)
+        client._client = MagicMock()
+
+        call_count = 0
+
+        class APIConnectionError(Exception):
+            """Simulates a retryable SDK error (matched by class name)."""
+            pass
+
+        async def mock_call_provider(prompt, temp, max_tok):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise APIConnectionError("transient failure")
+            return LLMResponse(
+                content="success on retry",
+                usage=TokenUsage(input_tokens=5, output_tokens=3),
+                provider="anthropic", model="test",
+            )
+
+        client._call_provider = mock_call_provider
+        response = await client.call("test")
+        assert response.content == "success on retry"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_non_retryable_error_returns_failure(self):
+        client = LLMClient(provider="anthropic", api_key="test-key", max_retries=2)
+        client._client = MagicMock()
+
+        async def mock_call_provider(prompt, temp, max_tok):
+            raise ValueError("bad input")
+
+        client._call_provider = mock_call_provider
+        response = await client.call("test")
+        assert "ValueError" in response.content
+
+    @pytest.mark.asyncio
+    async def test_budget_blocks_call(self):
+        client = LLMClient(provider="anthropic", api_key="test-key", max_cost_usd=0.01)
+        client._client = MagicMock()
+        client._total_usage.estimated_cost_usd = 0.02
+        response = await client.call("test")
+        assert "Budget exhausted" in response.content
+
+    @pytest.mark.asyncio
+    async def test_usage_accumulates_across_calls(self):
+        client = LLMClient(provider="anthropic", api_key="test-key")
+        client._client = MagicMock()
+
+        async def mock_call_provider(prompt, temp, max_tok):
+            return LLMResponse(
+                content="ok",
+                usage=TokenUsage(input_tokens=10, output_tokens=5),
+                provider="anthropic", model="test",
+            )
+
+        client._call_provider = mock_call_provider
+        await client.call("first")
+        await client.call("second")
+        assert client.total_usage.input_tokens == 20
+        assert client.total_usage.output_tokens == 10

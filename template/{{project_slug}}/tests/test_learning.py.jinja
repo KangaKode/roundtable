@@ -146,3 +146,254 @@ class TestUserProfileManager:
         profile = mgr.get_profile()
         explicit = profile.explicit_preferences
         assert any(p.key == "verbosity" for p in explicit)
+
+
+# =============================================================================
+# VECTOR STORE (fallback mode -- no ChromaDB)
+# =============================================================================
+
+from src.{{ project_slug }}.learning.rag.vector_store import VectorStore, SearchResults
+
+
+class TestVectorStore:
+    def test_add_and_count(self):
+        store = VectorStore(project_id="test_vs")
+        assert store.count == 0
+        store.add("d1", "first document", {"tag": "a"})
+        assert store.count == 1
+        store.add("d2", "second document", {"tag": "b"})
+        assert store.count == 2
+
+    def test_upsert_existing_id(self):
+        store = VectorStore(project_id="test_vs")
+        store.add("d1", "version 1")
+        store.add("d1", "version 2")
+        assert store.count == 1
+
+    def test_search_keyword_match(self):
+        store = VectorStore(project_id="test_vs")
+        store.add("d1", "Python programming language")
+        store.add("d2", "Java programming language")
+        store.add("d3", "French cooking recipes")
+        results = store.search("Python programming")
+        assert len(results.results) >= 1
+        assert results.results[0].id == "d1"
+
+    def test_search_empty_store(self):
+        store = VectorStore(project_id="test_vs")
+        results = store.search("anything")
+        assert results.results == []
+        assert results.total == 0
+
+    def test_search_cosine_similarity(self):
+        store = VectorStore(project_id="test_vs")
+        store.add("d1", "doc one", embedding=[1.0, 0.0, 0.0])
+        store.add("d2", "doc two", embedding=[0.0, 1.0, 0.0])
+        results = store.search("query", query_embedding=[0.9, 0.1, 0.0])
+        assert len(results.results) >= 1
+        assert results.results[0].id == "d1"
+
+    def test_delete(self):
+        store = VectorStore(project_id="test_vs")
+        store.add("d1", "document one")
+        store.add("d2", "document two")
+        store.delete("d1")
+        assert store.count == 1
+
+    def test_clear(self):
+        store = VectorStore(project_id="test_vs")
+        store.add("d1", "a")
+        store.add("d2", "b")
+        store.clear()
+        assert store.count == 0
+
+    def test_cosine_similarity_identical(self):
+        sim = VectorStore._cosine_similarity([1, 0, 0], [1, 0, 0])
+        assert abs(sim - 1.0) < 0.001
+
+    def test_cosine_similarity_orthogonal(self):
+        sim = VectorStore._cosine_similarity([1, 0, 0], [0, 1, 0])
+        assert abs(sim) < 0.001
+
+    def test_cosine_similarity_length_mismatch(self):
+        sim = VectorStore._cosine_similarity([1, 0], [1, 0, 0])
+        assert sim == 0.0
+
+    def test_cosine_similarity_zero_vector(self):
+        sim = VectorStore._cosine_similarity([0, 0, 0], [1, 0, 0])
+        assert sim == 0.0
+
+    def test_search_respects_limit(self):
+        store = VectorStore(project_id="test_vs")
+        for i in range(10):
+            store.add(f"d{i}", f"document about topic {i}")
+        results = store.search("document topic", limit=3)
+        assert len(results.results) <= 3
+
+
+# =============================================================================
+# EMBEDDING SERVICE (fallback mode -- no sentence-transformers/openai)
+# =============================================================================
+
+from unittest.mock import MagicMock
+from src.{{ project_slug }}.learning.rag.embedding_service import EmbeddingService, EmbeddingResult
+
+
+class TestEmbeddingService:
+    def test_fallback_provider_used(self):
+        svc = EmbeddingService()
+        assert svc.provider == "fallback"
+        assert svc.dimensions == 128
+
+    def test_embed_returns_correct_dimensions(self):
+        svc = EmbeddingService()
+        result = svc.embed("test text")
+        assert len(result.embedding) == 128
+        assert result.dimensions == 128
+        assert result.provider == "fallback"
+
+    def test_embed_deterministic(self):
+        svc = EmbeddingService()
+        r1 = svc.embed("same text")
+        r2 = svc.embed("same text")
+        assert r1.embedding == r2.embedding
+
+    def test_embed_different_texts_differ(self):
+        svc = EmbeddingService()
+        r1 = svc.embed("text one")
+        r2 = svc.embed("text two")
+        assert r1.embedding != r2.embedding
+
+    def test_cache_hit(self):
+        svc = EmbeddingService()
+        r1 = svc.embed("cached text")
+        assert r1.cached is False
+        r2 = svc.embed("cached text")
+        assert r2.cached is True
+        assert r1.embedding == r2.embedding
+
+    def test_embed_empty_text(self):
+        svc = EmbeddingService()
+        result = svc.embed("")
+        assert all(v == 0.0 for v in result.embedding)
+
+    def test_embed_batch(self):
+        svc = EmbeddingService()
+        results = svc.embed_batch(["a", "b", "c"])
+        assert len(results) == 3
+        assert all(isinstance(r, EmbeddingResult) for r in results)
+
+    def test_embed_local_with_mock(self):
+        svc = EmbeddingService()
+        svc._provider = "local"
+        svc._dimensions = 4
+        import numpy as np
+        mock_model = MagicMock()
+        mock_model.encode.return_value = np.array([0.1, 0.2, 0.3, 0.4])
+        svc._model = mock_model
+        svc._cache.clear()
+        result = svc.embed("test")
+        assert len(result.embedding) == 4
+        assert result.embedding == [0.1, 0.2, 0.3, 0.4]
+
+    def test_embed_local_fallback_on_error(self):
+        svc = EmbeddingService()
+        svc._provider = "local"
+        svc._dimensions = 128
+        mock_model = MagicMock()
+        mock_model.encode.side_effect = RuntimeError("model error")
+        svc._model = mock_model
+        svc._cache.clear()
+        result = svc.embed("test")
+        assert len(result.embedding) == 128
+
+    def test_embed_openai_with_mock(self):
+        svc = EmbeddingService()
+        svc._provider = "openai"
+        svc._dimensions = 4
+        mock_data = MagicMock()
+        mock_data.embedding = [0.5, 0.6, 0.7, 0.8]
+        mock_resp = MagicMock()
+        mock_resp.data = [mock_data]
+        mock_client = MagicMock()
+        mock_client.embeddings.create.return_value = mock_resp
+        svc._openai_client = mock_client
+        svc._cache.clear()
+        result = svc.embed("test")
+        assert result.embedding == [0.5, 0.6, 0.7, 0.8]
+
+    def test_embed_openai_fallback_on_error(self):
+        svc = EmbeddingService()
+        svc._provider = "openai"
+        svc._dimensions = 128
+        mock_client = MagicMock()
+        mock_client.embeddings.create.side_effect = Exception("API error")
+        svc._openai_client = mock_client
+        svc._cache.clear()
+        result = svc.embed("test")
+        assert len(result.embedding) == 128
+
+
+# =============================================================================
+# PREFERENCE RETRIEVER (using fallback services)
+# =============================================================================
+
+from src.{{ project_slug }}.learning.rag.preference_retriever import PreferenceRetriever
+
+
+class TestPreferenceRetriever:
+    @pytest.fixture
+    def retriever(self, learning_db):
+        store = VectorStore(project_id="test_retriever")
+        svc = EmbeddingService()
+        return PreferenceRetriever(
+            project_id="test",
+            vector_store=store,
+            embedding_service=svc,
+            db_path=learning_db,
+        )
+
+    def test_index_preference(self, retriever):
+        pref = UserPreference(
+            preference_type="style", key="verbosity", value="concise",
+            source="explicit", priority=80,
+        )
+        retriever.index_preference(pref)
+        assert retriever.indexed_count == 1
+
+    def test_search_returns_results(self, retriever):
+        for i, (key, val) in enumerate([
+            ("verbosity", "concise responses"),
+            ("tone", "professional tone"),
+            ("format", "use bullet points"),
+        ]):
+            retriever.index_preference(UserPreference(
+                id=f"pref_{i}", preference_type="style",
+                key=key, value=val, source="explicit", priority=70,
+            ))
+        results = retriever.search("verbose concise", limit=5)
+        assert len(results.results) >= 1
+
+    def test_search_min_priority_filter(self, retriever):
+        retriever.index_preference(UserPreference(
+            id="low", preference_type="style", key="a", value="low priority",
+            source="implicit", priority=10,
+        ))
+        retriever.index_preference(UserPreference(
+            id="high", preference_type="style", key="b", value="high priority",
+            source="explicit", priority=90,
+        ))
+        results = retriever.search("priority", min_priority=50)
+        for r in results.results:
+            assert r.metadata.get("priority", 0) >= 50
+
+    def test_clear_index(self, retriever):
+        retriever.index_preference(UserPreference(
+            preference_type="style", key="a", value="b",
+        ))
+        assert retriever.indexed_count == 1
+        retriever.clear_index()
+        assert retriever.indexed_count == 0
+
+    def test_indexed_count_empty(self, retriever):
+        assert retriever.indexed_count == 0

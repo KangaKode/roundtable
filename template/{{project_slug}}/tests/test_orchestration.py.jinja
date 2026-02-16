@@ -32,6 +32,45 @@ class TestAgentRouter:
         decision = router.route("test query")
         assert len(decision.selected_agents) <= 1
 
+    def test_route_with_llm_hint_validates_names(self, mock_registry):
+        router = AgentRouter(registry=mock_registry)
+        decision = router.route_with_llm_hint(
+            "test query", llm_suggested_agents=["analyst_a", "analyst_b"]
+        )
+        names = [a.name for a in decision.selected_agents]
+        assert "analyst_a" in names
+        assert "analyst_b" in names
+
+    def test_route_with_llm_hint_ignores_invalid(self, mock_registry):
+        router = AgentRouter(registry=mock_registry)
+        decision = router.route_with_llm_hint(
+            "test query", llm_suggested_agents=["nonexistent", "analyst_a"]
+        )
+        names = [a.name for a in decision.selected_agents]
+        assert "analyst_a" in names
+        assert "nonexistent" not in names
+
+    def test_route_with_llm_hint_falls_back_when_insufficient(self, mock_registry):
+        router = AgentRouter(registry=mock_registry, min_agents=2)
+        decision = router.route_with_llm_hint(
+            "analyze code quality", llm_suggested_agents=["analyst_a"]
+        )
+        assert len(decision.selected_agents) >= 2
+
+    def test_route_with_llm_hint_respects_max(self, mock_registry):
+        router = AgentRouter(registry=mock_registry, max_agents=1)
+        decision = router.route_with_llm_hint(
+            "test", llm_suggested_agents=["analyst_a", "analyst_b"]
+        )
+        assert len(decision.selected_agents) <= 1
+
+    def test_route_with_llm_hint_none_registry(self):
+        router = AgentRouter(registry=None)
+        decision = router.route_with_llm_hint(
+            "test", llm_suggested_agents=["analyst_a"]
+        )
+        assert decision.should_escalate is True
+
 
 class TestRoundTable:
     @pytest.mark.asyncio
