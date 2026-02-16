@@ -4,7 +4,7 @@ Model-Based Graders - LLM-as-judge for subjective evaluation.
 Use when output is freeform text where code-based matching is too brittle.
 Always pair with a rubric to constrain the judge.
 
-Reference: docs/AI_ENGINEERING_BEST_PRACTICES_2026.md (Part 5.3)
+Reference: docs/REFERENCES.md (Anthropic Evals guide)
 
 Keep this file under 100 lines.
 """

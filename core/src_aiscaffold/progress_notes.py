@@ -14,7 +14,7 @@ Trigger: Used by orchestration layer at session start/end.
 Output: Append-only log entries in SQLite.
 Task Boundary: Logging only. Does NOT make decisions.
 
-Reference: docs/AI_ENGINEERING_BEST_PRACTICES_2026.md (Part 3)
+Reference: docs/REFERENCES.md (Anthropic harness guide -- three-layer external state)
 """
 
 import json

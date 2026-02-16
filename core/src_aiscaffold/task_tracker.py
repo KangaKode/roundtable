@@ -13,7 +13,7 @@ Trigger: Used by orchestration layer at session start/end.
 Output: TaskList with structured pass/fail tracking.
 Task Boundary: Tracking only. Does NOT execute tasks.
 
-Reference: docs/AI_ENGINEERING_BEST_PRACTICES_2026.md (Part 3)
+Reference: docs/REFERENCES.md (Anthropic harness guide -- three-layer external state)
 """
 
 import json

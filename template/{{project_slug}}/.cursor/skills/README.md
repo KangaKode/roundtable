@@ -33,4 +33,4 @@ See `example-review/SKILL.md` for a working example.
 
 ## Reference
 
-See `docs/AI_ENGINEERING_BEST_PRACTICES_2026.md` (Part 6: Skills Architecture)
+See `docs/REFERENCES.md` for the Anthropic Skills guide and other industry research.
