@@ -1,0 +1,74 @@
+"""Unit tests for the LLM module -- client, json_parser, CacheablePrompt."""
+
+import pytest
+from src.{{project_slug}}.llm.client import CacheablePrompt, TokenUsage, LLMClient, LLMResponse
+from src.{{project_slug}}.llm.json_parser import extract_json, extract_json_or_raise
+
+
+class TestCacheablePrompt:
+    def test_to_flat_prompt_joins_parts(self):
+        p = CacheablePrompt(system="sys", context="ctx", user_message="msg")
+        flat = p.to_flat_prompt()
+        assert "sys" in flat
+        assert "ctx" in flat
+        assert "msg" in flat
+
+    def test_to_flat_prompt_skips_empty(self):
+        p = CacheablePrompt(user_message="only this")
+        flat = p.to_flat_prompt()
+        assert flat == "only this"
+
+    def test_total_length(self):
+        p = CacheablePrompt(system="abc", context="de", user_message="f")
+        assert p.total_length == 6
+
+
+class TestTokenUsage:
+    def test_total_tokens_calculated(self):
+        u = TokenUsage(input_tokens=100, output_tokens=50)
+        assert u.total_tokens == 150
+
+
+class TestExtractJson:
+    def test_parses_clean_json(self):
+        result = extract_json('{"key": "value"}')
+        assert result == {"key": "value"}
+
+    def test_strips_markdown_fences(self):
+        text = '```json\n{"key": "value"}\n```'
+        result = extract_json(text)
+        assert result == {"key": "value"}
+
+    def test_finds_json_in_preamble(self):
+        text = 'Here is the analysis:\n\n{"findings": [1, 2, 3]}\n\nEnd of report.'
+        result = extract_json(text)
+        assert result == {"findings": [1, 2, 3]}
+
+    def test_returns_none_on_garbage(self):
+        assert extract_json("this is not json at all") is None
+
+    def test_returns_none_on_empty(self):
+        assert extract_json("") is None
+
+    def test_extract_or_raise_raises(self):
+        with pytest.raises(ValueError, match="Could not parse"):
+            extract_json_or_raise("not json", context="test")
+
+    def test_parses_json_array(self):
+        result = extract_json('[1, 2, 3]')
+        assert result == [1, 2, 3]
+
+
+class TestLLMClient:
+    @pytest.mark.asyncio
+    async def test_returns_error_when_no_client(self):
+        client = LLMClient(provider="anthropic", api_key="")
+        response = await client.call("test prompt")
+        assert "not initialized" in response.content or response.content != ""
+
+    @pytest.mark.asyncio
+    async def test_budget_enforcement(self):
+        client = LLMClient(provider="anthropic", api_key="", max_cost_usd=0.0)
+        client._total_usage.estimated_cost_usd = 0.01
+        response = await client.call("test prompt")
+        assert "Budget exhausted" in response.content or "not initialized" in response.content

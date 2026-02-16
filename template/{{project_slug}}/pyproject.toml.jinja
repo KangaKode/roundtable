@@ -14,7 +14,7 @@ markers = [
     "smoke: Quick sanity checks",
     "slow: Tests taking >10s (nightly only)",
 ]
-{% if project_type == 'multi-agent' %}asyncio_mode = "auto"{% endif %}
+asyncio_mode = "auto"
 
 [tool.black]
 line-length = 120

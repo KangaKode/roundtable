@@ -1,0 +1,148 @@
+"""Unit tests for the learning module -- feedback, trust, check-ins, profile."""
+
+import pytest
+from src.{{project_slug}}.learning.models import FeedbackSignal, UserPreference, SignalType, CheckInStatus
+from src.{{project_slug}}.learning.feedback_tracker import FeedbackTracker
+from src.{{project_slug}}.learning.agent_trust import AgentTrustManager, DEFAULT_TRUST, TRUST_FLOOR, TRUST_CEILING
+from src.{{project_slug}}.learning.checkin_manager import CheckInManager
+from src.{{project_slug}}.learning.user_profile import UserProfileManager
+
+
+class TestFeedbackTracker:
+    def test_record_returns_signal_with_id(self, learning_db):
+        tracker = FeedbackTracker(db_path=learning_db)
+        signal = FeedbackSignal(signal_type="accept", agent_id="agent_a")
+        result = tracker.record(signal)
+        assert result.id is not None
+        assert result.signal_type == "accept"
+
+    def test_get_signals_filters_by_agent(self, learning_db):
+        tracker = FeedbackTracker(db_path=learning_db)
+        tracker.record(FeedbackSignal(signal_type="accept", agent_id="agent_a"))
+        tracker.record(FeedbackSignal(signal_type="reject", agent_id="agent_b"))
+
+        signals = tracker.get_signals(agent_id="agent_a")
+        assert len(signals) == 1
+        assert signals[0].agent_id == "agent_a"
+
+    def test_get_signals_filters_by_type(self, learning_db):
+        tracker = FeedbackTracker(db_path=learning_db)
+        tracker.record(FeedbackSignal(signal_type="accept", agent_id="agent_a"))
+        tracker.record(FeedbackSignal(signal_type="reject", agent_id="agent_a"))
+
+        signals = tracker.get_signals(signal_type="accept")
+        assert all(s.signal_type == "accept" for s in signals)
+
+    def test_get_signal_counts(self, learning_db):
+        tracker = FeedbackTracker(db_path=learning_db)
+        for _ in range(3):
+            tracker.record(FeedbackSignal(signal_type="accept", agent_id="a"))
+        for _ in range(2):
+            tracker.record(FeedbackSignal(signal_type="reject", agent_id="a"))
+
+        counts = tracker.get_signal_counts()
+        assert counts["accept"] == 3
+        assert counts["reject"] == 2
+
+    def test_get_acceptance_rates(self, learning_db):
+        tracker = FeedbackTracker(db_path=learning_db)
+        for _ in range(3):
+            tracker.record(FeedbackSignal(signal_type="accept", agent_id="agent_a"))
+        tracker.record(FeedbackSignal(signal_type="reject", agent_id="agent_a"))
+
+        rates = tracker.get_acceptance_rates()
+        assert "agent_a" in rates
+        assert rates["agent_a"] == pytest.approx(0.75, abs=0.01)
+
+
+class TestAgentTrustManager:
+    def test_default_trust_for_unknown(self, learning_db):
+        mgr = AgentTrustManager(db_path=learning_db)
+        assert mgr.get_trust("unknown_agent") == DEFAULT_TRUST
+
+    def test_accept_increases_trust(self, learning_db):
+        mgr = AgentTrustManager(db_path=learning_db)
+        signal = FeedbackSignal(signal_type=SignalType.ACCEPT, agent_id="agent_a")
+        result = mgr.update_from_signal(signal)
+        assert result.trust_score > DEFAULT_TRUST
+
+    def test_reject_decreases_trust(self, learning_db):
+        mgr = AgentTrustManager(db_path=learning_db)
+        signal = FeedbackSignal(signal_type=SignalType.REJECT, agent_id="agent_a")
+        result = mgr.update_from_signal(signal)
+        assert result.trust_score < DEFAULT_TRUST
+
+    def test_respects_floor(self, learning_db):
+        mgr = AgentTrustManager(db_path=learning_db)
+        for _ in range(100):
+            mgr.update_from_signal(FeedbackSignal(signal_type=SignalType.REJECT, agent_id="agent_a"))
+        assert mgr.get_trust("agent_a") >= TRUST_FLOOR
+
+    def test_respects_ceiling(self, learning_db):
+        mgr = AgentTrustManager(db_path=learning_db)
+        for _ in range(100):
+            mgr.update_from_signal(FeedbackSignal(signal_type=SignalType.ACCEPT, agent_id="agent_a"))
+        assert mgr.get_trust("agent_a") <= TRUST_CEILING
+
+    def test_get_all_scores(self, learning_db):
+        mgr = AgentTrustManager(db_path=learning_db)
+        mgr.update_from_signal(FeedbackSignal(signal_type=SignalType.ACCEPT, agent_id="a"))
+        mgr.update_from_signal(FeedbackSignal(signal_type=SignalType.REJECT, agent_id="b"))
+        scores = mgr.get_all_scores()
+        assert "a" in scores
+        assert "b" in scores
+
+
+class TestCheckInManager:
+    def test_create_persists(self, learning_db):
+        mgr = CheckInManager(db_path=learning_db)
+        checkin = mgr.create(checkin_type="threshold", prompt="Increase trust?")
+        assert checkin.id is not None
+        assert checkin.status == CheckInStatus.PENDING
+
+    def test_respond_approves(self, learning_db):
+        mgr = CheckInManager(db_path=learning_db)
+        checkin = mgr.create(checkin_type="threshold", prompt="Test?")
+        result = mgr.respond(checkin.id, approved=True)
+        assert result.status == CheckInStatus.APPROVED
+
+    def test_respond_rejects(self, learning_db):
+        mgr = CheckInManager(db_path=learning_db)
+        checkin = mgr.create(checkin_type="threshold", prompt="Test?")
+        result = mgr.respond(checkin.id, approved=False)
+        assert result.status == CheckInStatus.REJECTED
+
+    def test_skip(self, learning_db):
+        mgr = CheckInManager(db_path=learning_db)
+        checkin = mgr.create(checkin_type="threshold", prompt="Test?")
+        assert mgr.skip(checkin.id) is True
+
+    def test_get_pending(self, learning_db):
+        mgr = CheckInManager(db_path=learning_db)
+        mgr.create(checkin_type="threshold", prompt="Pending 1")
+        mgr.create(checkin_type="time", prompt="Pending 2")
+        pending = mgr.get_pending()
+        assert len(pending) == 2
+
+    def test_should_trigger_threshold(self, learning_db):
+        mgr = CheckInManager(db_path=learning_db)
+        assert mgr.should_trigger("threshold", signal_count=15, threshold=10) is True
+        assert mgr.should_trigger("threshold", signal_count=5, threshold=10) is False
+
+
+class TestUserProfileManager:
+    def test_save_and_retrieve_preference(self, learning_db):
+        mgr = UserProfileManager(db_path=learning_db)
+        pref = UserPreference(
+            preference_type="style",
+            key="verbosity",
+            value="concise",
+            source="explicit",
+            priority=80,
+        )
+        saved = mgr.save_preference(pref)
+        assert saved.key == "verbosity"
+
+        profile = mgr.get_profile()
+        explicit = profile.explicit_preferences
+        assert any(p.key == "verbosity" for p in explicit)

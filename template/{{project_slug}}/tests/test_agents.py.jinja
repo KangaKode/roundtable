@@ -1,0 +1,75 @@
+"""Unit tests for the agents module -- registry, remote agent, protocol."""
+
+import json
+import pytest
+from pathlib import Path
+from src.{{project_slug}}.agents.registry import AgentRegistry
+from src.{{project_slug}}.agents.remote import RemoteAgent
+from src.{{project_slug}}.orchestration.round_table import AgentProtocol
+
+
+class TestAgentRegistry:
+    def test_register_local_increments_count(self, mock_agent, tmp_path):
+        registry = AgentRegistry(persist_path=tmp_path / "agents.json")
+        registry.register_local(mock_agent)
+        assert registry.count == 1
+        assert registry.local_count == 1
+
+    def test_register_remote_persists(self, tmp_path):
+        registry = AgentRegistry(persist_path=tmp_path / "agents.json")
+        registry.register_remote("remote_a", "testing", "https://example.com")
+        assert registry.count == 1
+        assert registry.remote_count == 1
+        assert (tmp_path / "agents.json").exists()
+
+    def test_unregister_removes(self, mock_agent, tmp_path):
+        registry = AgentRegistry(persist_path=tmp_path / "agents.json")
+        registry.register_local(mock_agent)
+        assert registry.unregister(mock_agent.name) is True
+        assert registry.count == 0
+
+    def test_get_returns_none_for_unknown(self, tmp_path):
+        registry = AgentRegistry(persist_path=tmp_path / "agents.json")
+        assert registry.get("nonexistent") is None
+
+    def test_get_by_capability(self, mock_agent, tmp_path):
+        registry = AgentRegistry(persist_path=tmp_path / "agents.json")
+        registry.register_local(mock_agent, capabilities=["code_review"])
+        found = registry.get_by_capability("code_review")
+        assert len(found) == 1
+        assert found[0].name == mock_agent.name
+
+    def test_get_by_capability_empty(self, mock_agent, tmp_path):
+        registry = AgentRegistry(persist_path=tmp_path / "agents.json")
+        registry.register_local(mock_agent, capabilities=["code_review"])
+        found = registry.get_by_capability("nonexistent")
+        assert len(found) == 0
+
+
+class TestRemoteAgent:
+    def test_to_dict_uses_env_var_not_raw_key(self):
+        agent = RemoteAgent(
+            name="test_agent",
+            domain="testing",
+            base_url="https://example.com",
+            api_key="secret-key-123",
+        )
+        data = agent.to_dict()
+        assert "api_key" not in data
+        assert "api_key_env" in data
+        assert data["api_key_env"] == "AGENT_TEST_AGENT_API_KEY"
+
+    def test_sanitize_string_strips_nulls(self):
+        agent = RemoteAgent(name="t", domain="t", base_url="https://example.com")
+        result = agent._sanitize_string("hello\x00world")
+        assert "\x00" not in result
+
+
+class TestAgentProtocol:
+    def test_mock_agent_implements_protocol(self, mock_agent):
+        assert isinstance(mock_agent, AgentProtocol)
+
+    def test_non_agent_fails_protocol(self):
+        class NotAnAgent:
+            pass
+        assert not isinstance(NotAnAgent(), AgentProtocol)

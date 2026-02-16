@@ -1,24 +1,156 @@
 """
 Shared test fixtures for {{ project_name }}.
 
-Add project-specific fixtures here. All tests can use these via pytest's
-automatic fixture discovery.
+Provides:
+  - mock_llm: AsyncMock LLM client returning configurable responses
+  - mock_agent: A simple agent implementing AgentProtocol
+  - mock_registry: AgentRegistry with 2 pre-registered mock agents
+  - learning_db: Temp SQLite with learning schema initialized
+  - test_project_id: Static project ID for tests
+{% if include_api_gateway %}  - test_client: FastAPI AsyncClient for API testing{% endif %}
 """
 
+import asyncio
+import os
 import pytest
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
-{% if persistence == 'sqlite' %}
-import sqlite3
+from src.{{ project_slug }}.llm.client import LLMResponse, TokenUsage, CacheablePrompt
+from src.{{ project_slug }}.orchestration.round_table import (
+    AgentAnalysis, AgentChallenge, AgentVote, RoundTableTask, SynthesisResult,
+)
 
 
 @pytest.fixture
+def test_project_id():
+    """Static project ID for tests."""
+    return "test_project_001"
+
+
+@pytest.fixture
+def mock_llm():
+    """AsyncMock LLM client returning configurable responses."""
+    client = AsyncMock()
+    client.call = AsyncMock(return_value=LLMResponse(
+        content='{"observations": [{"finding": "test finding", "evidence": "test evidence", "severity": "info", "confidence": 0.8}], "recommendations": []}',
+        usage=TokenUsage(input_tokens=100, output_tokens=50),
+        model="test-model",
+        provider="test",
+    ))
+    client.provider = "test"
+    client.model = "test-model"
+    client.total_usage = TokenUsage()
+    return client
+
+
+class MockAgent:
+    """Simple mock agent implementing AgentProtocol."""
+
+    def __init__(self, name="mock_analyst", domain="general analysis"):
+        self._name = name
+        self._domain = domain
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def domain(self) -> str:
+        return self._domain
+
+    async def analyze(self, task):
+        return AgentAnalysis(
+            agent_name=self._name,
+            domain=self._domain,
+            observations=[{
+                "finding": f"Mock finding from {self._name}",
+                "evidence": "Mock evidence",
+                "severity": "info",
+                "confidence": 0.7,
+            }],
+            recommendations=[],
+            confidence=0.7,
+        )
+
+    async def challenge(self, task, other_analyses):
+        return AgentChallenge(agent_name=self._name)
+
+    async def vote(self, task, synthesis):
+        return AgentVote(agent_name=self._name, approve=True)
+
+
+@pytest.fixture
+def mock_agent():
+    """A single mock agent."""
+    return MockAgent()
+
+
+@pytest.fixture
+def mock_agents():
+    """Two mock agents for round table / routing tests."""
+    return [
+        MockAgent("analyst_a", "code analysis"),
+        MockAgent("analyst_b", "security analysis"),
+    ]
+
+
+@pytest.fixture
+def mock_registry(mock_agents):
+    """AgentRegistry with 2 pre-registered mock agents."""
+    from src.{{ project_slug }}.agents.registry import AgentRegistry
+    registry = AgentRegistry(persist_path=Path("/tmp/test_agents.json"))
+    for agent in mock_agents:
+        registry.register_local(agent, capabilities=["testing"])
+    return registry
+
+
+@pytest.fixture
+def learning_db(tmp_path):
+    """Temp SQLite with learning schema initialized. Auto-cleanup."""
+    db_path = tmp_path / "test_learning.db"
+    from src.{{ project_slug }}.learning.schema import initialize_schema
+    initialize_schema(db_path)
+    return db_path
+
+
+@pytest.fixture
+def sample_task():
+    """Sample RoundTableTask for tests."""
+    return RoundTableTask(
+        id="test_task_001",
+        content="Analyze the test scenario for correctness",
+        context={"source": "unit_test"},
+    )
+
+
+{% if include_api_gateway %}
+@pytest.fixture
+def test_client():
+    """FastAPI test client for API integration tests."""
+    from httpx import AsyncClient, ASGITransport
+    from src.{{ project_slug }}.api.gateway import create_app
+
+    os.environ.pop("API_KEY", None)
+    os.environ.pop("ENV", None)
+    app = create_app()
+    transport = ASGITransport(app=app)
+
+    async def _get_client():
+        return AsyncClient(transport=transport, base_url="http://test")
+
+    return _get_client
+{% endif %}
+
+
+{% if persistence == 'sqlite' %}
+@pytest.fixture
 def mock_db(tmp_path):
     """In-memory SQLite database for testing."""
+    import sqlite3
     db_path = tmp_path / "test.db"
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
-    # Add your table creation here:
-    # conn.execute("CREATE TABLE IF NOT EXISTS ...")
     conn.commit()
 
     class TestDB:
@@ -33,9 +165,3 @@ def mock_db(tmp_path):
     yield TestDB(db_path)
     conn.close()
 {% endif %}
-
-
-@pytest.fixture
-def test_project_id():
-    """Generate a test project ID."""
-    return "test_project_001"

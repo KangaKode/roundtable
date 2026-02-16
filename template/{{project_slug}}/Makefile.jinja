@@ -14,6 +14,17 @@ help: ## Show this help message
 test: ## Run all tests
 	python -m pytest tests/ -v --tb=short
 
+test-unit: ## Run unit tests only (no API/E2E)
+	python -m pytest tests/test_security.py tests/test_llm.py tests/test_learning.py tests/test_agents.py tests/test_orchestration.py -v --tb=short
+
+{% if include_api_gateway -%}
+test-api: ## Run API integration tests
+	python -m pytest tests/test_api.py -v --tb=short
+
+test-e2e: ## Run end-to-end tests
+	python -m pytest tests/test_e2e.py -v --tb=short
+{% endif %}
+
 test-p0: ## Run P0 critical tests only
 	python -m pytest tests/ -m "p0" -v --tb=short
 

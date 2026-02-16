@@ -1,0 +1,107 @@
+"""Unit tests for orchestration -- round table, chat orchestrator, agent router."""
+
+import pytest
+from src.{{project_slug}}.orchestration.round_table import RoundTable, RoundTableConfig, RoundTableTask
+from src.{{project_slug}}.orchestration.chat_orchestrator import ChatOrchestrator, ChatConfig
+from src.{{project_slug}}.orchestration.agent_router import AgentRouter
+
+
+class TestAgentRouter:
+    def test_route_selects_by_domain(self, mock_registry):
+        router = AgentRouter(registry=mock_registry)
+        decision = router.route("analyze the code for bugs")
+        assert len(decision.selected_agents) > 0
+
+    def test_route_respects_trust_scores(self, mock_registry):
+        router = AgentRouter(registry=mock_registry)
+        trust = {"analyst_a": 0.9, "analyst_b": 0.1}
+        decision = router.route("test query", trust_scores=trust)
+        if len(decision.selected_agents) > 0:
+            assert decision.selected_agents[0].name == "analyst_a"
+
+    def test_route_escalates_with_no_agents(self):
+        from pathlib import Path
+        from src.{{project_slug}}.agents.registry import AgentRegistry
+        empty_registry = AgentRegistry(persist_path=Path("/tmp/empty_agents.json"))
+        router = AgentRouter(registry=empty_registry)
+        decision = router.route("test query")
+        assert decision.should_escalate is True
+
+    def test_route_respects_max_agents(self, mock_registry):
+        router = AgentRouter(registry=mock_registry, max_agents=1)
+        decision = router.route("test query")
+        assert len(decision.selected_agents) <= 1
+
+
+class TestRoundTable:
+    @pytest.mark.asyncio
+    async def test_run_produces_result(self, mock_agents, mock_llm, sample_task):
+        config = RoundTableConfig(
+            enable_strategy_phase=False,
+            enable_challenge_phase=False,
+        )
+        rt = RoundTable(agents=mock_agents, config=config, llm_client=mock_llm)
+        result = await rt.run(sample_task)
+        assert result.task_id == sample_task.id
+        assert len(result.analyses) == 2
+
+    @pytest.mark.asyncio
+    async def test_consensus_threshold(self, mock_agents, mock_llm, sample_task):
+        config = RoundTableConfig(
+            enable_strategy_phase=False,
+            enable_challenge_phase=False,
+            consensus_threshold=0.5,
+        )
+        rt = RoundTable(agents=mock_agents, config=config, llm_client=mock_llm)
+        result = await rt.run(sample_task)
+        assert result.consensus_reached is True
+        assert result.approval_rate >= 0.5
+
+    @pytest.mark.asyncio
+    async def test_strategy_wires_into_context(self, mock_agents, mock_llm, sample_task):
+        config = RoundTableConfig(
+            enable_strategy_phase=True,
+            enable_challenge_phase=False,
+        )
+        mock_llm.call.return_value.content = '{"task_decomposition": ["step1"], "agent_focus_areas": {"analyst_a": "focus_a"}, "anticipated_tensions": [], "success_criteria": []}'
+        rt = RoundTable(agents=mock_agents, config=config, llm_client=mock_llm)
+        result = await rt.run(sample_task)
+        assert result.task_id == sample_task.id
+
+
+class TestChatOrchestrator:
+    @pytest.mark.asyncio
+    async def test_chat_produces_response(self, mock_llm, mock_registry):
+        orchestrator = ChatOrchestrator(
+            llm=mock_llm,
+            registry=mock_registry,
+        )
+        response = await orchestrator.chat("What is testing?")
+        assert response.content is not None
+        assert len(response.content) > 0
+
+    @pytest.mark.asyncio
+    async def test_chat_tracks_history(self, mock_llm, mock_registry):
+        orchestrator = ChatOrchestrator(llm=mock_llm, registry=mock_registry)
+        await orchestrator.chat("First message")
+        await orchestrator.chat("Second message")
+        assert orchestrator.history_length == 4  # 2 user + 2 assistant
+
+    @pytest.mark.asyncio
+    async def test_clear_history(self, mock_llm, mock_registry):
+        orchestrator = ChatOrchestrator(llm=mock_llm, registry=mock_registry)
+        await orchestrator.chat("message")
+        orchestrator.clear_history()
+        assert orchestrator.history_length == 0
+
+
+class TestSessionKey:
+    def test_session_key_binds_to_user(self):
+        from src.{{project_slug}}.api.routes.chat import _session_key
+        key = _session_key("my_session", "apikey12345")
+        assert key == "apikey12:my_session"
+
+    def test_session_key_anon_without_key(self):
+        from src.{{project_slug}}.api.routes.chat import _session_key
+        key = _session_key("my_session", None)
+        assert key == "anon:my_session"

@@ -1,0 +1,212 @@
+{% if include_api_gateway -%}
+"""API integration tests using FastAPI TestClient."""
+
+import pytest
+from httpx import AsyncClient, ASGITransport
+
+from src.{{ project_slug }}.api.gateway import create_app
+
+
+@pytest.fixture
+async def client():
+    """Async test client for the API gateway."""
+    import os
+    os.environ.pop("API_KEY", None)
+    os.environ.pop("ENV", None)
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+# =============================================================================
+# HEALTH
+# =============================================================================
+
+
+class TestHealth:
+    @pytest.mark.asyncio
+    async def test_liveness(self, client):
+        r = await client.get("/health")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "healthy"
+
+    @pytest.mark.asyncio
+    async def test_readiness(self, client):
+        r = await client.get("/health/ready")
+        assert r.status_code == 200
+        data = r.json()
+        assert "ready" in data
+
+
+# =============================================================================
+# AGENTS
+# =============================================================================
+
+
+class TestAgentsAPI:
+    @pytest.mark.asyncio
+    async def test_register_agent(self, client):
+        r = await client.post("/api/v1/agents", json={
+            "name": "test_agent",
+            "domain": "testing",
+            "base_url": "https://example.com",
+        })
+        assert r.status_code == 200
+        assert r.json()["name"] == "test_agent"
+
+    @pytest.mark.asyncio
+    async def test_register_duplicate_rejected(self, client):
+        await client.post("/api/v1/agents", json={
+            "name": "dup_agent", "domain": "testing", "base_url": "https://example.com",
+        })
+        r = await client.post("/api/v1/agents", json={
+            "name": "dup_agent", "domain": "testing", "base_url": "https://example.com",
+        })
+        assert r.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_register_ssrf_blocked(self, client):
+        r = await client.post("/api/v1/agents", json={
+            "name": "evil_agent", "domain": "testing", "base_url": "http://127.0.0.1:8080",
+        })
+        assert r.status_code == 400
+        assert "private" in r.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_list_agents(self, client):
+        await client.post("/api/v1/agents", json={
+            "name": "list_agent", "domain": "testing", "base_url": "https://example.com",
+        })
+        r = await client.get("/api/v1/agents")
+        assert r.status_code == 200
+        assert r.json()["total"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_delete_agent(self, client):
+        await client.post("/api/v1/agents", json={
+            "name": "del_agent", "domain": "testing", "base_url": "https://example.com",
+        })
+        r = await client.delete("/api/v1/agents/del_agent")
+        assert r.status_code == 200
+        assert r.json()["status"] == "removed"
+
+
+# =============================================================================
+# ROUND TABLE
+# =============================================================================
+
+
+class TestRoundTableAPI:
+    @pytest.mark.asyncio
+    async def test_no_agents_returns_400(self, client):
+        r = await client.post("/api/v1/round-table/tasks", json={
+            "content": "Test task",
+        })
+        assert r.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_validates_content_length(self, client):
+        r = await client.post("/api/v1/round-table/tasks", json={
+            "content": "",
+        })
+        assert r.status_code == 400
+
+
+# =============================================================================
+# CHAT
+# =============================================================================
+
+
+class TestChatAPI:
+    @pytest.mark.asyncio
+    async def test_chat_validates_empty_message(self, client):
+        r = await client.post("/api/v1/chat", json={
+            "message": "",
+        })
+        assert r.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_clear_history(self, client):
+        r = await client.post("/api/v1/chat/clear", params={"session_id": "test"})
+        assert r.status_code == 200
+        assert r.json()["status"] == "cleared"
+
+
+# =============================================================================
+# SESSIONS
+# =============================================================================
+
+
+class TestSessionsAPI:
+    @pytest.mark.asyncio
+    async def test_create_session(self, client):
+        r = await client.post("/api/v1/sessions", json={})
+        assert r.status_code == 200
+        data = r.json()
+        assert "session_id" in data
+        assert data["session_id"].startswith("session_")
+
+    @pytest.mark.asyncio
+    async def test_get_session(self, client):
+        create_r = await client.post("/api/v1/sessions", json={})
+        sid = create_r.json()["session_id"]
+        r = await client.get(f"/api/v1/sessions/{sid}")
+        assert r.status_code == 200
+        assert r.json()["session_id"] == sid
+
+    @pytest.mark.asyncio
+    async def test_add_turn_validates_content(self, client):
+        create_r = await client.post("/api/v1/sessions", json={})
+        sid = create_r.json()["session_id"]
+        r = await client.post(f"/api/v1/sessions/{sid}/turns", json={"content": ""})
+        assert r.status_code == 400
+
+
+# =============================================================================
+# FEEDBACK
+# =============================================================================
+
+
+class TestFeedbackAPI:
+    @pytest.mark.asyncio
+    async def test_record_feedback(self, client):
+        r = await client.post("/api/v1/feedback", json={
+            "signal_type": "accept",
+            "agent_id": "test_agent",
+            "context_type": "chat",
+        })
+        assert r.status_code == 200
+        assert r.json()["signal_type"] == "accept"
+
+    @pytest.mark.asyncio
+    async def test_reject_invalid_signal_type(self, client):
+        r = await client.post("/api/v1/feedback", json={
+            "signal_type": "invalid_type",
+        })
+        assert r.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_acceptance_rates(self, client):
+        r = await client.get("/api/v1/feedback/rates")
+        assert r.status_code == 200
+        assert "rates" in r.json()
+
+
+# =============================================================================
+# CHECKINS
+# =============================================================================
+
+
+class TestCheckinsAPI:
+    @pytest.mark.asyncio
+    async def test_list_pending(self, client):
+        r = await client.get("/api/v1/checkins")
+        assert r.status_code == 200
+        assert "checkins" in r.json()
+
+
+{% else -%}
+# API tests skipped: include_api_gateway is false
+{% endif -%}

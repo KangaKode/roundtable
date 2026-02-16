@@ -201,7 +201,43 @@ else
 fi
 
 # =========================================================================
-# Step 8: File Structure Check
+# Step 8: Unit Tests (run pytest on generated project)
+# =========================================================================
+section "Step 8: Unit Tests"
+if [ -d "$GEN_ROOT/tests" ]; then
+    cd "$GEN_ROOT"
+    # Install project dependencies quietly (skip LLM providers to avoid API key issues)
+    pip install -q pytest pytest-asyncio pytest-cov fastapi uvicorn httpx pydantic python-dotenv 2>/dev/null
+
+    # Run unit tests only (skip API/E2E which need more setup)
+    UNIT_FILES=""
+    for f in tests/test_security.py tests/test_llm.py tests/test_learning.py tests/test_agents.py tests/test_orchestration.py; do
+        if [ -f "$f" ]; then
+            UNIT_FILES="$UNIT_FILES $f"
+        fi
+    done
+
+    if [ -n "$UNIT_FILES" ]; then
+        if python3 -m pytest $UNIT_FILES -x -q --tb=short 2>&1 | tail -5; then
+            PYTEST_EXIT=${PIPESTATUS[0]}
+            if [ "$PYTEST_EXIT" -eq 0 ]; then
+                pass "Unit tests passed"
+            else
+                fail "Unit tests: some failures (exit code $PYTEST_EXIT)"
+            fi
+        else
+            fail "Unit tests: could not run pytest"
+        fi
+    else
+        warn "No unit test files found in generated project"
+    fi
+    cd "$REPO_ROOT"
+else
+    warn "tests/ directory not found in generated project"
+fi
+
+# =========================================================================
+# Step 9: File Structure Check
 # =========================================================================
 section "Step 8: File Structure"
 EXPECTED_DIRS="agents api harness llm orchestration security"
