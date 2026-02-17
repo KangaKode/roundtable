@@ -35,6 +35,8 @@ One-command scaffold ([copier](https://copier.readthedocs.io/)) for AI agent pro
 
 **If cost matters** -- prompt caching cuts LLM costs by up to ~90% on cached content (Anthropic cache_control, OpenAI prefix caching). Per-call token tracking and budget enforcement prevent runaway spending. You see exactly what each round table costs.
 
+*This is the foundation. You bring the domain expertise -- your agents, your data sources, your use case. The scaffold handles orchestration, safety, and infrastructure so you focus on what makes your project unique.*
+
 ---
 
 ## Just Want One Agent?
