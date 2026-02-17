@@ -325,6 +325,50 @@ See [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md) for the full HTTP contract with JSON 
 
 ---
 
+## Compliance Considerations for Regulated Industries
+
+If your platform operates in a regulated industry (finance, healthcare, legal, government), AI interactions may be subject to legal discovery, audit, or regulatory review. Consider adding:
+
+### Discoverability awareness
+
+Users interacting with AI agents should be informed that their prompts, agent responses, and round table deliberations may be discoverable in litigation or regulatory proceedings. Common approaches:
+
+- **Chat banner**: Persistent, non-dismissable notice above the chat input (e.g., *"All prompts and AI outputs are potentially discoverable in litigation or regulatory proceedings."*)
+- **Round table notice**: Same banner above the round table task submission
+- **API response header**: `X-AI-Discoverability-Notice` header on all AI-generated responses
+- **Export disclaimer**: Discoverability paragraph appended to any exported reports or artifacts
+
+### Audit trail
+
+The scaffold already writes round table artifacts as JSON and indexes transcripts for search. For regulated deployments, consider adding:
+
+- **Prompt/response hash logging**: SHA-256 hash of every prompt and response stored in a tamper-evident audit database, separate from the application database
+- **Immutable storage**: Write artifacts to append-only storage (S3 with object lock, immutable database tables)
+- **Timestamp attestation**: Cryptographic timestamps on artifacts for non-repudiation
+
+### Legal hold
+
+When litigation or regulatory investigation is anticipated, log deletion must stop. Consider:
+
+- **Legal hold flag**: Environment variable or config that disables all log cleanup, cache eviction, and data retention policies when active
+- **Hold notification**: Log a warning on startup when legal hold is active so operators are aware
+
+### Data retention
+
+Define retention policies for each data store and document them for your legal/compliance team:
+
+| Data Store | Default Retention | Regulatory Consideration |
+|------------|------------------|--------------------------|
+| Chat sessions | In-memory (lost on restart) | May need persistent storage for compliance |
+| Round table artifacts | Filesystem (permanent) | Define retention period with legal team |
+| Transcript search index | ChromaDB (permanent) | Subject to discovery; include in hold policy |
+| Feedback signals | SQLite (permanent) | May contain PII; subject to GDPR/CCPA |
+| Agent trust scores | SQLite (permanent) | Audit trail for routing decisions |
+
+> **Note:** These are considerations for your legal and compliance team to evaluate. The scaffold provides the infrastructure hooks -- your organization defines the policies.
+
+---
+
 ## Summary: What's Built vs What You Add
 
 | Capability | Status | Notes |
