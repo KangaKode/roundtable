@@ -42,7 +42,7 @@ class AuthContext:
 
     Attributes:
         api_key: The raw API key (None if auth is disabled).
-        user_id: Short identifier derived from the key (first 8 chars) or "anon".
+        user_id: Short identifier derived from SHA-256 hash of the key (16 hex chars) or "anon".
         tenant_id: Tenant/org identifier. Defaults to "default" for single-tenant.
     """
 

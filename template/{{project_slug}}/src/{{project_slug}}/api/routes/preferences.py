@@ -21,6 +21,7 @@ from ...learning.models import UserPreference
 from ...learning.user_profile import UserProfileManager
 from ...security import ValidationError, validate_length
 from ..middleware.auth import AuthContext, verify_api_key
+from ..middleware.rate_limit import check_rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -123,6 +124,7 @@ async def search_preferences(
     limit: int = 10,
     preference_type: str | None = None,
     auth: AuthContext = Depends(verify_api_key),
+    _rate: None = Depends(check_rate_limit),
 ) -> dict:
     """Semantic search over preferences."""
     try:

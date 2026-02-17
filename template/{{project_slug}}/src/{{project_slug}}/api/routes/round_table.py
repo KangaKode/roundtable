@@ -208,8 +208,14 @@ async def search_transcripts(
     limit: int = 10,
     consensus_only: bool = False,
     auth: AuthContext = Depends(verify_api_key),
+    _rate: None = Depends(check_rate_limit),
 ) -> dict:
     """Semantic search over past round table deliberations."""
+    try:
+        validate_length(q, "query", min_length=1, max_length=1000)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     indexer = getattr(request.app.state, "transcript_indexer", None)
     if indexer is None:
         raise HTTPException(

@@ -78,13 +78,5 @@ class EvidenceLevelEnforcer:
                     suggestion="Name the data source: [INDICATED: source_name]",
                 ))
 
-        critical_count = sum(1 for v in violations if v.severity == "critical")
-
-        if critical_count > 0:
-            outcome = "challenged"
-        elif violations:
-            outcome = "challenged"
-        else:
-            outcome = "accepted"
-
+        outcome = "challenged" if violations else "accepted"
         return ValidationResult(outcome=outcome, violations=violations)

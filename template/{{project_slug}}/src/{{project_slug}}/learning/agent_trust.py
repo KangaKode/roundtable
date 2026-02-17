@@ -199,18 +199,19 @@ class AgentTrustManager:
                 "SELECT * FROM agent_trust WHERE project_id = ? ORDER BY trust_score DESC",
                 (project_id,),
             ).fetchall()
-            return [
-                AgentTrustScore(
-                    agent_id=dict_from_row(r)["agent_id"],
-                    project_id=dict_from_row(r).get("project_id", project_id),
-                    trust_score=dict_from_row(r).get("trust_score", DEFAULT_TRUST),
-                    interaction_count=dict_from_row(r).get("interaction_count", 0),
-                    acceptance_rate=dict_from_row(r).get("acceptance_rate", 0.5),
-                    last_signal_type=dict_from_row(r).get("last_signal_type", ""),
-                    metadata=dict_from_row(r).get("metadata", {}),
-                    last_updated=dict_from_row(r).get("last_updated", ""),
-                )
-                for r in rows
-            ]
+            results = []
+            for r in rows:
+                data = dict_from_row(r)
+                results.append(AgentTrustScore(
+                    agent_id=data["agent_id"],
+                    project_id=data.get("project_id", project_id),
+                    trust_score=data.get("trust_score", DEFAULT_TRUST),
+                    interaction_count=data.get("interaction_count", 0),
+                    acceptance_rate=data.get("acceptance_rate", 0.5),
+                    last_signal_type=data.get("last_signal_type", ""),
+                    metadata=data.get("metadata", {}),
+                    last_updated=data.get("last_updated", ""),
+                ))
+            return results
         finally:
             conn.close()

@@ -309,7 +309,13 @@ class RoundTable:
             if data is None:
                 logger.warning("[RoundTable] Strategy phase returned unparseable JSON")
                 return StrategyPlan(reasoning=response.content)
-            return StrategyPlan(**data, reasoning=response.content)
+            return StrategyPlan(
+                task_decomposition=data.get("task_decomposition", []),
+                agent_focus_areas=data.get("agent_focus_areas", {}),
+                anticipated_tensions=data.get("anticipated_tensions", []),
+                success_criteria=data.get("success_criteria", []),
+                reasoning=response.content,
+            )
         except Exception as e:
             logger.warning(f"[RoundTable] Strategy phase failed: {e}")
             return StrategyPlan(

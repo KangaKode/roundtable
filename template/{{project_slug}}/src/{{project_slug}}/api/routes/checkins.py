@@ -51,7 +51,10 @@ def _get_checkin_mgr(request: Request) -> CheckInManager:
 
 
 @router.get("/checkins")
-async def list_pending_checkins(request: Request) -> dict:
+async def list_pending_checkins(
+    request: Request,
+    auth: AuthContext = Depends(verify_api_key),
+) -> dict:
     """List all pending check-ins awaiting user response."""
     mgr = _get_checkin_mgr(request)
     pending = mgr.get_pending()

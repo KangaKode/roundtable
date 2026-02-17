@@ -11,7 +11,7 @@ import logging
 import re
 from typing import Protocol, runtime_checkable
 
-from .models import ValidationResult
+from .models import ValidationResult, Violation
 
 logger = logging.getLogger(__name__)
 
@@ -55,18 +55,29 @@ class MathVerifier:
 
     def check(self, text: str) -> ValidationResult:
         """Check numeric claims in text against ground truth. No-op with default provider."""
-        violations = []
-
         if isinstance(self._provider, DefaultGroundTruthProvider):
             return ValidationResult(outcome="accepted", violations=[])
 
+        violations = []
         for match in NUMERIC_CLAIM_PATTERN.finditer(text):
-            claimed_value = match.group(1) or match.group(2)
-            if claimed_value:
-                try:
-                    float(claimed_value)
-                except ValueError:
-                    continue
+            claimed_str = match.group(1) or match.group(2)
+            if not claimed_str:
+                continue
+            try:
+                claimed = float(claimed_str)
+            except ValueError:
+                continue
+
+            context = text[max(0, match.start() - 50):match.end() + 50]
+            ground_truth = self._provider.get_value(context)
+            if ground_truth is not None and abs(claimed - ground_truth) > 0.01:
+                violations.append(Violation(
+                    rule="math:numeric_mismatch",
+                    severity="critical",
+                    message=f"Claimed {claimed_str} but ground truth is {ground_truth}",
+                    location=match.group(0),
+                    suggestion=f"Correct the value to {ground_truth}",
+                ))
 
         return ValidationResult(
             outcome="challenged" if violations else "accepted",
