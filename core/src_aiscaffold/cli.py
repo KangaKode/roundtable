@@ -21,7 +21,7 @@ from rich.table import Table
 app = typer.Typer(help="AI project scaffold with 2026 best practices")
 console = Console()
 
-TEMPLATE_REPO = "gh:KangaKode/aiscaffold"
+TEMPLATE_REPO = "gh:KangaKode/roundtable"
 LOCAL_TEMPLATE = str(Path(__file__).parent.parent.parent.parent / "aiscaffold-template")
 
 
