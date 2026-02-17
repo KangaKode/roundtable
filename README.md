@@ -25,6 +25,60 @@ One-command scaffold ([copier](https://copier.readthedocs.io/)) for AI agent pro
 
 ## How It Works
 
+### System Architecture
+
+```mermaid
+flowchart TD
+    subgraph boundary [API Gateway - FastAPI]
+        Auth[Auth + Rate Limiting]
+    end
+    Auth --> Chat[Chat Orchestrator]
+    Auth --> RT[Round Table Engine]
+    Chat -->|"low confidence"| RT
+    Chat --> Router[Agent Router]
+    Router --> Registry[Agent Registry]
+    RT --> Registry
+    Registry --> Local[Local Python Agents]
+    Registry --> Remote[Remote HTTP Agents]
+    RT --> Enforce[Evidence Enforcement Pipeline]
+    subgraph llm [LLM Client]
+        Cache[Prompt Caching]
+        Providers["Anthropic / OpenAI / Google"]
+    end
+    Chat --> llm
+    RT --> llm
+    Enforce --> llm
+    subgraph safety [Core Safety Agents]
+        Skeptic[Skeptic]
+        Quality[Quality]
+        EvidenceA[Evidence]
+        FactChk[FactChecker]
+        Citation[Citation]
+    end
+    safety --> RT
+    subgraph learn [Learning System]
+        Feedback[Feedback + Trust]
+        Prefs[Preferences + RAG]
+    end
+    Router -.->|"trust scores"| learn
+    Auth -.-> learn
+```
+
+Two interaction modes share the same agent registry, LLM client, and safety infrastructure. The chat orchestrator handles real-time queries and escalates to the full round table when needed.
+
+### Chat Orchestrator: User-Facing Entry Point
+
+```mermaid
+flowchart LR
+    User[User Message] --> Router[Agent Router]
+    Router -->|"selects 1-3"| Specialists[Relevant Specialists]
+    Specialists --> CrossCheck[Cross-Check]
+    CrossCheck -->|agreement| Response[Synthesized Response]
+    CrossCheck -->|disagreement| Escalate[Escalate to Round Table]
+```
+
+The chat orchestrator routes messages to the most relevant specialists (based on domain matching + trust scores), cross-checks their responses, and escalates to the full round table when confidence is low.
+
 ### Round Table: 4-Phase Multi-Agent Deliberation
 
 ```mermaid
@@ -37,6 +91,9 @@ flowchart LR
         Q[Quality]
         E[Evidence]
     end
+    subgraph enforce [Evidence Enforcement]
+        EF[FactChecker + EvidenceLevelEnforcer]
+    end
     subgraph phase2 [Phase 2: Challenge]
         CH[Cross-Agent Challenge]
     end
@@ -44,25 +101,13 @@ flowchart LR
         SY[Synthesis]
         V[Voting]
     end
-    phase1 --> phase2
+    phase1 --> enforce
+    enforce -->|"accepted / rewritten"| phase2
     phase2 --> phase3
     phase3 --> Result[Consensus or Dissent]
 ```
 
-Each agent analyzes the task independently, then agents challenge each other's findings with counter-evidence (not opinions), and finally vote on a synthesized recommendation. Core safety agents participate in every phase.
-
-### Chat Orchestrator: Lightweight Real-Time Interaction
-
-```mermaid
-flowchart LR
-    User[User Message] --> Router[Agent Router]
-    Router -->|"selects 1-3"| Specialists[Relevant Specialists]
-    Specialists --> CrossCheck[Cross-Check]
-    CrossCheck -->|agreement| Response[Synthesized Response]
-    CrossCheck -->|disagreement| Escalate[Escalate to Round Table]
-```
-
-The chat orchestrator routes messages to the most relevant specialists (based on domain matching + trust scores), cross-checks their responses, and escalates to the full round table when confidence is low.
+Each agent analyzes the task independently. The enforcement pipeline validates responses (rejecting speculation, requiring evidence tags). Agents then challenge each other's findings with counter-evidence, and finally vote on a synthesized recommendation.
 
 ### Core Safety Agents
 
@@ -83,25 +128,6 @@ flowchart TD
 ```
 
 Core agents are **meta-agents** -- they evaluate *how well* the analysis was done, not *what* was analyzed. They work alongside your domain specialists in every round table by default. Opt out with `include_core_agents=False` if you have a specific reason.
-
-### Evidence Citation Levels
-
-Every agent in a scaffolded project is prompted to cite evidence for findings. The system supports four evidence levels, from strongest to weakest:
-
-| Level | Meaning | Requirement |
-|-------|---------|-------------|
-| **VERIFIED** | "Direct proof exists at this location" | Must cite specific data source and reference. The system can validate the citation exists. |
-| **CORROBORATED** | "Multiple independent sources agree" | Must name at least 2 independent sources. Stronger than any single source alone. |
-| **INDICATED** | "Data suggests this, but there are gaps" | Must name the source and acknowledge what data is missing. |
-| **POSSIBLE** | "Cannot rule out -- warrants investigation" | Must explain what additional data would confirm or deny the finding. |
-
-**Enforcement pipeline** -- Runs automatically after Phase 1, before Phase 2:
-1. **FactChecker** scans for banned patterns: "probably", "I think", "90% confident", "seems to"
-2. **EvidenceLevelEnforcer** validates tag format (VERIFIED needs source:ref, CORROBORATED needs 2+ sources)
-3. **CitationValidator** checks that cited sources exist (pluggable SourceRegistry)
-4. **MathVerifier** validates numeric claims against ground truth (pluggable)
-
-Responses with 3+ critical violations are **rejected and auto-rewritten** via LLM correction prompt (up to 2 retries). The FactChecker and Citation core agents also participate in deliberation to explain *why* violations are problematic.
 
 ---
 
@@ -189,6 +215,25 @@ Teaches your project to learn from user interactions:
 - API key auth with production enforcement (`AuthContext` with multi-tenancy structural prep)
 - CORS restricted to configured origins (wildcard rejected)
 - DNS TOCTOU limitation documented on URL validation
+
+### Evidence Enforcement Pipeline
+
+Every agent's output is validated before it enters the challenge phase. Four evidence levels, from strongest to weakest:
+
+| Level | Meaning | Requirement |
+|-------|---------|-------------|
+| **VERIFIED** | "Direct proof exists at this location" | Must cite specific data source and reference |
+| **CORROBORATED** | "Multiple independent sources agree" | Must name at least 2 independent sources |
+| **INDICATED** | "Data suggests this, but there are gaps" | Must name the source and acknowledge missing data |
+| **POSSIBLE** | "Cannot rule out -- warrants investigation" | Must explain what would confirm or deny the finding |
+
+The enforcement pipeline runs automatically after Phase 1:
+1. **FactChecker** -- scans for banned patterns: "probably", "I think", "90% confident", "seems to"
+2. **EvidenceLevelEnforcer** -- validates tag format (VERIFIED needs source:ref, CORROBORATED needs 2+ sources)
+3. **CitationValidator** -- checks cited sources exist (pluggable SourceRegistry)
+4. **MathVerifier** -- validates numeric claims against ground truth (pluggable)
+
+Responses with 3+ critical violations are **rejected and auto-rewritten** via LLM correction prompt (up to 2 retries).
 
 ### Multi-Tenancy Structural Prep
 
