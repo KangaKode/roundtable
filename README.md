@@ -262,7 +262,7 @@ flowchart LR
 
 ### 14 Development Subagents (`.cursor/agents/`)
 
-Cursor IDE agent definitions that assist during development (not runtime agents):
+Cursor IDE agent definitions that assist during development (not runtime agents). These prompts are portable to any agent framework including Claude Code.
 
 | Agent | Role |
 |-------|------|
