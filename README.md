@@ -23,6 +23,18 @@ One-command scaffold ([copier](https://copier.readthedocs.io/)) for AI agent pro
 
 ---
 
+## Who Is This For?
+
+**If you're tired of LLM hallucinations** -- the enforcement pipeline rejects speculation ("probably", "I think", "90% confident") and requires evidence citations on every finding. Agents that can't cite their sources get auto-corrected via LLM rewrite. Four evidence levels (VERIFIED, CORROBORATED, INDICATED, POSSIBLE) make claim strength explicit.
+
+**If you're building internal AI tools** -- security is baked in, not bolted on. SSRF protection, prompt injection defense, HMAC-SHA256 webhooks, rate limiting, and API auth are already wired into every endpoint. You don't have to build this yourself.
+
+**If you're evaluating build-vs-buy for multi-agent** -- the round table protocol, chat orchestrator, external agent API (any language), and [Platform Deployment Guide](docs/PLATFORM_GUIDE.md) save you 3+ months of architecture work. RBAC, tenant isolation, and agent visibility are structurally ready.
+
+**If cost matters** -- prompt caching cuts LLM costs by ~90% on repeated interactions (Anthropic cache_control, OpenAI prefix caching). Per-call token tracking and budget enforcement prevent runaway spending. You see exactly what each round table costs.
+
+---
+
 ## Just Want One Agent?
 
 If you just want a single agent behind an API (no round table, no multi-agent), here's the fast path:
