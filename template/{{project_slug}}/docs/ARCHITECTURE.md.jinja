@@ -201,4 +201,14 @@ The learning system (feedback, trust, preferences) uses `project_id` in every ta
 
 ### Session Isolation
 
-Chat sessions are keyed by `{tenant_id}:{user_id}:{session_id}`, preventing cross-tenant session access
+Chat sessions are keyed by `{tenant_id}:{user_id}:{session_id}`, preventing cross-tenant session access.
+
+### Platform Extension Points
+
+If you're building a shared platform for multiple teams, here's where to extend:
+
+- **RBAC**: Add `role` field to `AuthContext` (in `api/middleware/auth.py`). Create a `check_permission(auth, resource, action)` dependency. The `verify_api_key` function is the single hook point -- swap it for JWT/OIDC to get roles from your identity provider.
+- **Per-tenant rate limiting**: `rate_limit.py` currently limits by IP. To limit by tenant, key the `_request_log` on `auth.tenant_id` instead of `client_ip`. All routes already receive `AuthContext`.
+- **Agent marketplace**: `AgentRegistry.list_for_tenant()` already filters by visibility. To add discovery, add a `description`, `version`, and `tags` to `AgentEntry`, then expose a `GET /api/v1/marketplace` endpoint that lists `public` agents across all tenants.
+- **Per-tenant billing**: `TokenUsage` tracks cost per LLM call. Aggregate by `auth.tenant_id` in a billing table. The `_track_usage` method in `llm/client.py` is the hook point.
+- **Deployment topology**: Single-binary serves all tenants (simplest). For stronger isolation, deploy one instance per tenant behind a routing layer that sets `tenant_id` in the auth header

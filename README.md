@@ -23,6 +23,25 @@ One-command scaffold ([copier](https://copier.readthedocs.io/)) for AI agent pro
 
 ---
 
+## Just Want One Agent?
+
+If you just want a single agent behind an API (no round table, no multi-agent), here's the fast path:
+
+```bash
+copier copy gh:KangaKode/aiscaffold my-project --trust
+cd my-project && python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+make new-agent NAME=my_analyst DOMAIN="code review"
+make serve
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Review this function for bugs"}'
+```
+
+The chat endpoint routes to your agent automatically. The round table, safety agents, and learning system are there when you need them -- they won't get in your way until you do.
+
+---
+
 ## How It Works
 
 ### System Architecture
@@ -77,7 +96,9 @@ flowchart LR
     CrossCheck -->|disagreement| Escalate[Escalate to Round Table]
 ```
 
-The chat orchestrator routes messages to the most relevant specialists (based on domain matching + trust scores), cross-checks their responses, and escalates to the full round table when confidence is low.
+The chat orchestrator routes messages to the most relevant specialists (based on domain matching + trust scores), cross-checks their responses, and escalates to the full round table when specialists disagree.
+
+**Escalation triggers:** When the cross-check finds specialist agreement below 40% (configurable via `escalation_threshold` in `ChatConfig`), the response is flagged with `escalation_suggested=True` and both conflicting views are shown. The chat endpoint also escalates when the agent router can't find enough relevant specialists. Users can manually escalate any topic via `POST /api/v1/chat/escalate`.
 
 ### Round Table: 4-Phase Multi-Agent Deliberation
 

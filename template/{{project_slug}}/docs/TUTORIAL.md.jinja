@@ -222,6 +222,50 @@ make test-all       # Run with coverage report
 
 > **Tip:** Look at the existing test files (`tests/test_agents.py`, `tests/test_orchestration.py`) for more patterns. Every test file follows the same structure: import the module, use fixtures, assert outcomes.
 
+### Step 4: Register your agent
+
+Your agent exists as a file, but the system doesn't know about it yet. Register it in the application startup so the chat orchestrator and round table can find it.
+
+{% if include_api_gateway -%}
+Open `src/{{ project_slug }}/api/gateway.py` and add your agent after the registry is created:
+
+```python
+# In create_app(), after "application.state.registry = registry":
+from ..agents.my_agent import MyAgent
+
+my_agent = MyAgent(llm_client=llm_client)
+registry.register_local(my_agent, capabilities=["code_review"])
+```
+
+That's it. Your agent is now available to the chat orchestrator (it routes by domain matching) and the round table (it includes all registered agents).
+
+**Multiple agents?** Register each one:
+
+```python
+from ..agents.code_reviewer import CodeReviewer
+from ..agents.security_analyst import SecurityAnalyst
+
+registry.register_local(CodeReviewer(llm_client=llm_client), capabilities=["code_review"])
+registry.register_local(SecurityAnalyst(llm_client=llm_client), capabilities=["security"])
+```
+
+> **Note:** The 5 core safety agents (Skeptic, Quality, Evidence, FactChecker, Citation) are auto-registered by the round table -- you don't need to register them manually. Your agents are additive: if you register 3, round tables will have 8 participants (your 3 + 5 core).
+{% else -%}
+Register your agent when creating a round table:
+
+```python
+from src.{{ project_slug }}.agents.my_agent import MyAgent
+from src.{{ project_slug }}.orchestration.round_table import RoundTable, RoundTableConfig, RoundTableTask
+from src.{{ project_slug }}.llm import create_client
+
+llm = create_client()
+agents = [MyAgent(llm)]
+rt = RoundTable(agents=agents, config=RoundTableConfig(), llm_client=llm)
+```
+
+The 5 core safety agents are auto-included alongside your agents.
+{% endif -%}
+
 ---
 
 {% if include_api_gateway -%}
