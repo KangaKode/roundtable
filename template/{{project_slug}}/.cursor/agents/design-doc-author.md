@@ -1,6 +1,11 @@
 ---
 name: design-doc-author
 description: Creates the three mandatory design documents (Architecture Map, Data Flow Diagram, Wireframes) required before any feature implementation. Use when starting a new feature. Follows the architecture-first mandate.
+trigger_phrases:
+  - "design doc"
+  - "architecture map"
+  - "data flow diagram"
+  - "wireframe"
 ---
 
 # Design Doc Author

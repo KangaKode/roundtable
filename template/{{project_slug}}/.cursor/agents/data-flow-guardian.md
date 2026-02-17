@@ -1,6 +1,11 @@
 ---
 name: data-flow-guardian
 description: Traces data flow through the system, validates source of truth, prevents data corruption, and ensures correct data movement between layers. Use when adding new data paths, modifying database operations, or debugging data inconsistencies.
+trigger_phrases:
+  - "data flow"
+  - "source of truth"
+  - "data integrity"
+  - "trace data path"
 ---
 
 # Data Flow Guardian

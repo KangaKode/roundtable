@@ -1,6 +1,11 @@
 ---
 name: security-hardener
 description: Proactive security hardening and vulnerability assessment. Use when adding new endpoints, handling user input, integrating APIs, or doing security audits. This is the "blue team" -- defensive security, not adversarial testing.
+trigger_phrases:
+  - "harden security"
+  - "security audit"
+  - "defensive security"
+  - "vulnerability assessment"
 ---
 
 # Security Hardener (Blue Team)

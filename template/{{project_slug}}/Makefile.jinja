@@ -81,6 +81,9 @@ doctor: ## Check project structure health
 	@echo "=== Linters ==="
 	ruff check . --statistics || true
 	@echo ""
+	@echo "=== Doc Freshness ==="
+	python scripts/doc_freshness.py || true
+	@echo ""
 	@echo "Doctor complete."
 
 scan: ## Full project scan (architecture + red team + linters + file sizes) -- use for continuous quality

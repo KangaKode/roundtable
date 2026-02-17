@@ -1,6 +1,11 @@
 ---
 name: debugger
 description: Root cause analysis and debugging for complex issues. Use when encountering errors, unexpected behavior, or test failures.
+trigger_phrases:
+  - "debug this"
+  - "root cause"
+  - "why is this failing"
+  - "trace the bug"
 ---
 
 # Debugger

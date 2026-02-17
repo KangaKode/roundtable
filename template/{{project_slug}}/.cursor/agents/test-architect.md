@@ -1,6 +1,11 @@
 ---
 name: test-architect
 description: Testing strategy, test design, and eval development. Use when writing tests, designing eval suites, reviewing test coverage, or when tests are failing for unclear reasons.
+trigger_phrases:
+  - "test strategy"
+  - "write tests"
+  - "eval design"
+  - "coverage analysis"
 ---
 
 # Test Architect

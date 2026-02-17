@@ -1,6 +1,11 @@
 ---
 name: code-reviewer
 description: Reviews code changes for quality, security, maintainability, and architectural compliance. Use after making code changes or before committing.
+trigger_phrases:
+  - "code review"
+  - "review this code"
+  - "check quality"
+  - "maintainability review"
 ---
 
 # Code Reviewer

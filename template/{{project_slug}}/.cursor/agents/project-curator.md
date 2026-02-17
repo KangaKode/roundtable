@@ -1,6 +1,11 @@
 ---
 name: project-curator
 description: Enforces project structure, directory organization, and architectural cleanliness. Use when reorganizing files, cleaning up the root directory, or verifying project structure standards.
+trigger_phrases:
+  - "project structure"
+  - "directory cleanup"
+  - "file organization"
+  - "root cleanliness"
 ---
 
 # Project Curator

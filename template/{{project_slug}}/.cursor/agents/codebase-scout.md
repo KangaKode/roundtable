@@ -1,6 +1,11 @@
 ---
 name: codebase-scout
 description: Explores existing codebase BEFORE writing new code. Finds duplicate logic, existing utilities, and reusable components. Must be consulted before creating any new file or function to prevent reinventing what already exists. Use proactively -- AI agents often skip this step.
+trigger_phrases:
+  - "find existing code"
+  - "search codebase"
+  - "does this already exist"
+  - "reuse check"
 ---
 
 # Codebase Scout

@@ -331,7 +331,58 @@ asyncio.run(main())
 
 ---
 
-## Part 5: Next Steps (5 min)
+## Part 5: Track Your Work (3 min)
+
+The scaffold follows a three-layer state pattern from Anthropic's best practices. This keeps your agent sessions productive across interruptions.
+
+### Three layers
+
+| Layer | Format | Purpose |
+|-------|--------|---------|
+| **Task list** | `tasks.json` | What remains to be done (structured, machine-readable) |
+| **Progress notes** | SQLite | What was recently attempted and what happened |
+| **Git history** | Commits | Exactly what code changed and why |
+
+### Session startup ritual
+
+Your `SessionProtocol` does this automatically in `startup()`:
+
+```python
+# 1. Read task list and pick highest-priority incomplete task
+# 2. Read recent progress notes to get up to speed
+# 3. Load user preferences into context
+# 4. Run health check before starting work
+```
+
+### Session cleanup ritual
+
+And in `cleanup()`:
+
+```python
+# 1. Save updated task list
+# 2. Append progress note with what was attempted
+# 3. Flush any queued feedback signals
+# 4. Leave state clean for the next session
+```
+
+### Using the task tracker
+
+```python
+from pathlib import Path
+
+# In your agent's work() method:
+task_path = Path("tasks.json")
+
+# Tasks are JSON -- agents manipulate JSON more reliably than Markdown
+# Example tasks.json:
+# {"tasks": [{"id": "1", "name": "Fix auth bug", "status": "pending"}]}
+```
+
+> **Why JSON over Markdown?** The Anthropic research found that LLMs are less likely to inappropriately modify JSON files compared to Markdown. JSON also supports mechanical validation (schema checks, coverage tracking).
+
+---
+
+## Part 6: Next Steps (5 min)
 
 Now that you have a working agent, here's where to go next:
 

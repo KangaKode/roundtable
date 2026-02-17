@@ -1,115 +1,126 @@
 """
-Reliability Eval Tasks (5 of 20) - Consistency, refusal, timeout, large input, concurrency.
+Reliability Evals (3 tasks) -- consistency, error handling, graceful degradation.
 
-These tests verify that the system behaves reliably under various conditions:
-repeated inputs, LLM failures, slow responses, edge-case inputs, and parallel access.
+CODE-BASED graders testing the scaffold's reliability properties.
 """
 
-import asyncio
 import pytest
 
-
-class TestConsistency:
-    """Eval 11: Same input twice should produce compatible outputs."""
-
-    def test_deterministic_with_zero_temperature(self):
-        """With temperature=0, same input should produce identical output."""
-        # Requires real LLM or deterministic mock
-        pass  # Replace with your LLM consistency test
-
-    def test_compatible_outputs_with_temperature(self):
-        """With temperature>0, outputs should be different but compatible in meaning."""
-        # Run same prompt twice, verify both contain the same key findings
-        pass  # Replace with semantic similarity test
+from src.{{ project_slug }}.orchestration.round_table import (
+    AgentAnalysis,
+    AgentChallenge,
+    AgentVote,
+    RoundTable,
+    RoundTableConfig,
+    RoundTableTask,
+    SynthesisResult,
+)
 
 
-class TestRefusalHandling:
-    """Eval 12: Does the system gracefully handle LLM refusals?"""
+class MockReliableAgent:
+    """Agent that always produces valid output."""
 
-    def test_refusal_does_not_crash(self):
-        """If the LLM refuses to answer, the system should not crash."""
-        # Mock an LLM that returns "I cannot help with that"
-        refusal_response = "I'm sorry, I cannot help with that request."
-        # Your system should handle this gracefully
-        assert isinstance(refusal_response, str)
+    def __init__(self, name="reliable"):
+        self._name = name
 
-    def test_refusal_produces_informative_error(self):
-        """Refusal should produce an actionable error message, not a traceback."""
-        pass  # Replace with your refusal handling test
+    @property
+    def name(self):
+        return self._name
 
-    def test_fallback_on_refusal(self):
-        """System should try fallback provider if primary refuses."""
-        pass  # Replace with fallback test
+    @property
+    def domain(self):
+        return "testing"
 
+    async def analyze(self, task):
+        return AgentAnalysis(
+            agent_name=self.name, domain=self.domain,
+            observations=[{"finding": "test", "evidence": "test", "severity": "info"}],
+        )
 
-class TestTimeoutHandling:
-    """Eval 13: Does the system handle slow LLM responses?"""
+    async def challenge(self, task, analyses):
+        return AgentChallenge(agent_name=self.name)
 
-    def test_timeout_does_not_hang(self):
-        """A slow response should time out, not hang forever."""
-        # Your LLM client should have a timeout configured
-        pass  # Replace with timeout test
-
-    @pytest.mark.asyncio
-    async def test_async_timeout(self):
-        """Async calls should respect timeout limits."""
-        async def slow_call():
-            await asyncio.sleep(0.1)
-            return "done"
-
-        result = await asyncio.wait_for(slow_call(), timeout=1.0)
-        assert result == "done"
+    async def vote(self, task, synthesis):
+        return AgentVote(agent_name=self.name, approve=True)
 
 
-class TestLargeInputHandling:
-    """Eval 14: Does the system handle maximum-length input?"""
+class MockFailingAgent:
+    """Agent that raises exceptions."""
 
-    def test_large_text_processed(self):
-        """System should handle large input without crashing."""
-        from src.security.prompt_guard import sanitize_for_prompt  # type: ignore
+    @property
+    def name(self):
+        return "failing"
 
-        large_input = "word " * 50_000  # ~250K chars
-        result = sanitize_for_prompt(large_input, max_length=100_000)
-        assert len(result) <= 100_020
-        assert "[TRUNCATED]" in result
+    @property
+    def domain(self):
+        return "testing"
 
-    def test_large_json_parsed(self):
-        """Large JSON payloads should parse without issues."""
-        import json
+    async def analyze(self, task):
+        raise RuntimeError("Agent crashed during analysis")
 
-        large_data = {"items": [{"id": i, "text": f"Item {i}"} for i in range(1000)]}
-        serialized = json.dumps(large_data)
-        parsed = json.loads(serialized)
-        assert len(parsed["items"]) == 1000
+    async def challenge(self, task, analyses):
+        raise RuntimeError("Agent crashed during challenge")
+
+    async def vote(self, task, synthesis):
+        raise RuntimeError("Agent crashed during vote")
 
 
-class TestConcurrentSafety:
-    """Eval 15: No race conditions in parallel agent calls."""
+class TestGracefulDegradation:
+    """Eval: Does the round table survive agent failures?"""
 
     @pytest.mark.asyncio
-    async def test_parallel_tasks_independent(self):
-        """Parallel async tasks should not interfere with each other."""
-        results = []
-
-        async def task(value):
-            await asyncio.sleep(0.01)
-            results.append(value)
-            return value
-
-        await asyncio.gather(task(1), task(2), task(3))
-        assert sorted(results) == [1, 2, 3]
+    async def test_survives_single_agent_failure(self):
+        """One failing agent should not crash the entire round table."""
+        agents = [MockReliableAgent("good_agent"), MockFailingAgent()]
+        rt = RoundTable(
+            agents=agents,
+            config=RoundTableConfig(
+                enable_strategy_phase=False,
+                enable_challenge_phase=False,
+                include_core_agents=False,
+                enforce_evidence=False,
+            ),
+        )
+        task = RoundTableTask(id="reliability_test", content="Test graceful degradation")
+        result = await rt.run(task)
+        assert len(result.analyses) >= 1
+        assert any(a.agent_name == "good_agent" for a in result.analyses)
 
     @pytest.mark.asyncio
-    async def test_shared_state_not_corrupted(self):
-        """Shared data structures should not be corrupted by concurrent access."""
-        counter = {"value": 0}
+    async def test_produces_result_with_all_agents_failing(self):
+        """Even if all user agents fail, round table should not crash."""
+        agents = [MockFailingAgent()]
+        rt = RoundTable(
+            agents=agents,
+            config=RoundTableConfig(
+                enable_strategy_phase=False,
+                enable_challenge_phase=False,
+                include_core_agents=False,
+                enforce_evidence=False,
+            ),
+        )
+        task = RoundTableTask(id="all_fail_test", content="Test total failure")
+        result = await rt.run(task)
+        assert result.task_id == "all_fail_test"
 
-        async def increment():
-            current = counter["value"]
-            await asyncio.sleep(0.001)
-            counter["value"] = current + 1
 
-        # This is intentionally racy -- in real code, use locks
-        await asyncio.gather(*[increment() for _ in range(10)])
-        # With race condition, value < 10. Test documents the risk.
-        assert counter["value"] >= 1  # At least some increments succeed
+class TestOutputConsistency:
+    """Eval: Are round table outputs consistent across runs?"""
+
+    @pytest.mark.asyncio
+    async def test_deterministic_agents_produce_stable_output(self):
+        """Same input + deterministic agents = same structure."""
+        agents = [MockReliableAgent("agent_a"), MockReliableAgent("agent_b")]
+        config = RoundTableConfig(
+            enable_strategy_phase=False,
+            enable_challenge_phase=False,
+            include_core_agents=False,
+            enforce_evidence=False,
+        )
+        task = RoundTableTask(id="consistency_test", content="Test consistency")
+
+        result1 = await RoundTable(agents=agents, config=config).run(task)
+        result2 = await RoundTable(agents=agents, config=config).run(task)
+
+        assert len(result1.analyses) == len(result2.analyses)
+        assert set(a.agent_name for a in result1.analyses) == set(a.agent_name for a in result2.analyses)

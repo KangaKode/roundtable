@@ -1,101 +1,95 @@
 """
-Quality Eval Tasks (5 of 20) - Output format, instruction following, evidence, confidence, context.
+Quality Evals (3 tasks) -- evidence levels, citation format, output structure.
 
-These tests verify that agent outputs meet quality standards:
-correct format, follow instructions, cite evidence, calibrate confidence,
-and use provided context.
+Mix of CODE-BASED and MODEL-BASED grader examples.
+Code-based evals run without LLM. Model-based show the pattern for when you need one.
 """
 
-import json
+import os
 import pytest
 
-
-class TestOutputFormat:
-    """Eval 6: Does output match expected JSON schema?"""
-
-    def test_valid_json_parseable(self):
-        """Agent outputs claiming to be JSON must be valid JSON."""
-        valid = '{"findings": [{"finding": "x", "severity": "info"}]}'
-        data = json.loads(valid)
-        assert "findings" in data
-
-    def test_required_fields_present(self):
-        """Agent analysis output must contain required fields."""
-        # Define your project's required output schema
-        required_fields = {"observations", "recommendations"}
-        sample = {"observations": [], "recommendations": []}
-        assert required_fields.issubset(sample.keys())
-
-    def test_severity_values_valid(self):
-        """Severity must be one of the allowed values."""
-        valid_severities = {"critical", "warning", "info"}
-        for severity in valid_severities:
-            assert severity in valid_severities
+from src.{{ project_slug }}.enforcement.evidence_levels import EvidenceLevelEnforcer
+from evals.graders.code_grader import CodeGrader
 
 
-class TestInstructionFollowing:
-    """Eval 7: Does the agent follow stated constraints?"""
+class TestEvidenceLevelFormat:
+    """Eval: Are evidence level tags properly formatted? (Code-based grader)"""
 
-    def test_max_length_respected(self):
-        """When told to limit output length, it should comply."""
-        # This requires a real LLM call or a mock that simulates compliance
-        pass  # Replace with your LLM integration test
+    def test_verified_requires_source_and_reference(self):
+        enforcer = EvidenceLevelEnforcer()
+        result = enforcer.check("[VERIFIED: just_a_source] No reference provided")
+        assert any("verified" in v.rule for v in result.violations)
 
-    def test_format_constraints_followed(self):
-        """When told to output JSON, it should not add preamble text."""
-        pass  # Replace with format compliance test
+    def test_corroborated_requires_two_sources(self):
+        enforcer = EvidenceLevelEnforcer()
+        result = enforcer.check("[CORROBORATED: only_one] Single source claim")
+        assert any("corroborated" in v.rule for v in result.violations)
 
-    def test_negative_constraints_followed(self):
-        """When told NOT to do something, it should comply."""
-        # e.g., "Do NOT generate code" -> output should not contain code blocks
-        pass  # Replace with negative constraint test
-
-
-class TestEvidenceCitation:
-    """Eval 8: Does the agent cite sources when required?"""
-
-    def test_findings_have_evidence(self):
-        """Every finding should include an evidence field."""
-        sample_findings = [
-            {"finding": "Issue found", "evidence": "Line 42 shows...", "severity": "warning"},
-            {"finding": "Another issue", "evidence": "The data shows...", "severity": "info"},
-        ]
-        for f in sample_findings:
-            assert "evidence" in f
-            assert len(f["evidence"]) > 0
-
-    def test_empty_evidence_flagged(self):
-        """Findings with empty evidence should be flagged as low-quality."""
-        finding = {"finding": "Something is wrong", "evidence": "", "severity": "warning"}
-        assert finding["evidence"] == ""  # This should fail quality check
+    def test_valid_evidence_tags_accepted(self):
+        enforcer = EvidenceLevelEnforcer()
+        text = (
+            "[VERIFIED: logs:row_42] Found the entry. "
+            "[CORROBORATED: logs + alerts] Both sources agree. "
+            "[INDICATED: network_data] Pattern suggests lateral movement. "
+            "[POSSIBLE] VPN logs would confirm this."
+        )
+        result = enforcer.check(text)
+        assert result.outcome == "accepted"
 
 
-class TestConfidenceCalibration:
-    """Eval 9: Is stated confidence accurate?"""
+class TestAgentOutputStructure:
+    """Eval: Does agent output meet structural requirements? (Code-based grader)"""
 
-    def test_confidence_in_valid_range(self):
-        """Confidence must be between 0.0 and 1.0."""
-        for conf in [0.0, 0.5, 0.75, 1.0]:
-            assert 0.0 <= conf <= 1.0
+    def test_analysis_has_required_fields(self):
+        """Every AgentAnalysis must have agent_name, domain, and observations."""
+        from src.{{ project_slug }}.orchestration.round_table import AgentAnalysis
 
-    def test_low_evidence_low_confidence(self):
-        """Findings with little evidence should have lower confidence."""
-        # This is a heuristic check -- in real evals, compare against ground truth
-        finding_strong = {"evidence": "Multiple data points confirm...", "confidence": 0.9}
-        finding_weak = {"evidence": "Maybe...", "confidence": 0.3}
-        assert finding_strong["confidence"] > finding_weak["confidence"]
+        grader = CodeGrader("analysis_structure")
+        grader.add_check("has_agent_name", lambda a: bool(a.agent_name))
+        grader.add_check("has_domain", lambda a: bool(a.domain))
+        grader.add_check("has_observations", lambda a: isinstance(a.observations, list))
+
+        analysis = AgentAnalysis(
+            agent_name="test_agent",
+            domain="testing",
+            observations=[{"finding": "test", "evidence": "test", "severity": "info"}],
+        )
+        result = grader.grade(analysis)
+        assert result.passed
+        assert result.checks_passed == 3
 
 
-class TestContextRelevance:
-    """Eval 10: Does the agent actually use the provided context?"""
+class TestModelBasedQualityEval:
+    """Eval: Is the synthesis recommendation actionable? (Model-based grader example)
 
-    def test_context_referenced(self):
-        """Agent output should reference key terms from provided context."""
-        context = "The database uses PostgreSQL with connection pooling."
-        # Agent output should mention PostgreSQL, not MySQL
-        output = "The PostgreSQL database connection pool should be configured..."
-        assert "PostgreSQL" in output
+    This demonstrates the MODEL-BASED grader pattern. It requires a real LLM
+    to run. Skip in CI; use for periodic quality checks.
+    """
 
-    def test_irrelevant_context_ignored(self):
-        """Agent should not hallucinate relevance for unrelated context."""
-        pass  # Replace with your context relevance test
+    REAL_LLM = os.getenv("EVAL_USE_REAL_LLM", "0") == "1"
+
+    @pytest.mark.skipif(not REAL_LLM, reason="Requires EVAL_USE_REAL_LLM=1")
+    @pytest.mark.asyncio
+    async def test_synthesis_is_actionable(self):
+        """Use LLM-as-judge to evaluate synthesis quality."""
+        from evals.graders.model_graders import ModelGraderConfig, grade_with_model
+        from src.{{ project_slug }}.llm import create_client
+
+        llm = create_client()
+        config = ModelGraderConfig(
+            eval_name="synthesis_actionable",
+            rubric=(
+                "Score the recommendation on actionability:\n"
+                "- 1.0: Specific next steps with clear owners\n"
+                "- 0.7: General direction but actionable\n"
+                "- 0.3: Vague advice without specifics\n"
+                "- 0.0: No actionable content"
+            ),
+            pass_threshold=0.7,
+        )
+        result = await grade_with_model(
+            llm, config,
+            input_text="Review authentication module for security vulnerabilities",
+            output_text="Fix the SQL injection on line 42 by using parameterized queries. Add rate limiting to the login endpoint.",
+        )
+        assert result.passed

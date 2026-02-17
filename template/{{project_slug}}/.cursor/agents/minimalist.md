@@ -1,6 +1,11 @@
 ---
 name: minimalist
 description: Prevents over-engineering and code bloat. Use when reviewing changes for unnecessary complexity, when an agent has written too much code, or when simplifying a design. Invoke proactively on any change over 100 lines.
+trigger_phrases:
+  - "simplify this"
+  - "too complex"
+  - "over-engineered"
+  - "reduce code"
 ---
 
 # Minimalist Agent

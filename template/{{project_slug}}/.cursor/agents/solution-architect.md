@@ -1,6 +1,11 @@
 ---
 name: solution-architect
 description: System architecture, technology evaluation, and design decisions. Use when making architectural choices, evaluating approaches, planning new features, or when unsure how a new component fits into the existing system. Must be consulted BEFORE coding any new feature.
+trigger_phrases:
+  - "architecture decision"
+  - "evaluate approach"
+  - "system design"
+  - "how should this work"
 ---
 
 # Solution Architect

@@ -1,6 +1,11 @@
 ---
 name: prompt-engineer
 description: Prompt design, optimization, and evaluation specialist. Use when writing or reviewing LLM prompts, designing agent instructions, or improving prompt quality. Follows 2026 Anthropic Skills guide patterns.
+trigger_phrases:
+  - "prompt design"
+  - "improve this prompt"
+  - "prompt optimization"
+  - "system prompt"
 ---
 
 # Prompt Engineer

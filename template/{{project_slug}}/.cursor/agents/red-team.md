@@ -1,6 +1,11 @@
 ---
 name: red-team
 description: Adversarial review of code changes before commit. Finds security vulnerabilities, architectural violations, data leaks, prompt injection risks, and logic errors. Use before committing or when reviewing critical changes.
+trigger_phrases:
+  - "security review"
+  - "red team this"
+  - "check for vulnerabilities"
+  - "pre-commit review"
 ---
 
 # Red Team Agent
