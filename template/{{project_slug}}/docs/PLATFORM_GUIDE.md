@@ -55,6 +55,13 @@ async def verify_api_key(
 
 Every route in the system already receives `AuthContext` -- no other changes needed for tenant identification.
 
+> **SECURITY: JWT Verification**
+> - Always verify the JWT signature cryptographically against your IdP's public key. Never use decode-only.
+> - Validate `iss` (issuer), `aud` (audience), and `exp` (expiry) claims.
+> - Reject `alg: none` and weak algorithms. Use `RS256` or `ES256`.
+> - Example: `jwt.decode(token, public_key, algorithms=["RS256"], audience="your-app")`
+> - Never trust tenant_id from the request body. Always extract it from the verified JWT.
+
 ### 1b. Add role to AuthContext
 
 Edit the `AuthContext` dataclass in `auth.py`:
@@ -107,6 +114,36 @@ async def submit_task(auth: AuthContext = Depends(require_role("member"))): ...
 # Only admins can register agents
 @router.post("/agents")
 async def register_agent(auth: AuthContext = Depends(require_role("admin"))): ...
+```
+
+### Recommended route-to-role matrix
+
+Apply `require_role` to every route. Here's the recommended minimum:
+
+| Route | Method | Minimum Role | Rationale |
+|-------|--------|-------------|-----------|
+| `/chat` | POST | viewer | Low-risk, read-oriented |
+| `/chat/stream` | POST | viewer | Same as chat |
+| `/chat/clear` | POST | member | Modifies state |
+| `/chat/escalate` | POST | member | Triggers full round table |
+| `/round-table/tasks` | POST | member | Expensive (LLM calls) |
+| `/round-table/tasks/{id}` | GET | viewer | Read-only |
+| `/round-table/search` | GET | viewer | Read-only |
+| `/agents` | GET | viewer | List visible agents |
+| `/agents` | POST | admin | Registers new agent |
+| `/agents/{id}` | GET | viewer | Read-only |
+| `/agents/{id}` | DELETE | admin | Removes agent |
+| `/agents/health` | POST | admin | Triggers outbound HTTP |
+| `/feedback` | POST | member | Records signals |
+| `/feedback` | GET | viewer | Read-only |
+| `/preferences` | POST | member | Modifies preferences |
+| `/preferences` | GET | viewer | Read-only |
+| `/checkins` | GET | viewer | Read-only |
+| `/checkins/{id}/respond` | POST | member | Approves/rejects |
+| `/webhooks/agents/{id}` | POST | member | Receives agent results |
+| `/health` | GET | (public) | K8s probes, no auth |
+| `/health/ready` | GET | (public) | K8s probes, no auth |
+| `/metrics` | GET | admin | Operational data |
 ```
 
 ---
@@ -173,7 +210,12 @@ entry.visibility = registration.visibility or "team"  # Default to team-private
 | `team` | Same tenant only | Only the registering team |
 | `private` | Registering user only | Only the specific user |
 
-Use `registry.list_for_tenant(auth.tenant_id)` in routes instead of `registry.get_all()` to enforce visibility.
+> **SECURITY: Visibility enforcement checklist**
+> - Replace `registry.list_info()` and `registry.get_all()` with `registry.list_for_tenant(auth.tenant_id)` in the `GET /agents` route. Without this, any user can see all agents across tenants.
+> - For `private` agents, `list_for_tenant` alone is insufficient -- it filters by tenant but not user. Implement `list_for_user(tenant_id, user_id)` that also checks `entry.user_id == auth.user_id` for private agents.
+> - Only platform admins should set `visibility="public"`. Default all new registrations to `"team"`. Reject `visibility="public"` from non-admin callers.
+> - Never read `tenant_id` from the request body. Always use `auth.tenant_id` from the verified JWT.
+> - Update `_save_remote_agents` and `_load_remote_agents` in `registry.py` to persist `tenant_id` and `visibility` fields. Without this, remote agents revert to `visibility="public"` and `tenant_id="default"` on restart.
 
 ---
 
@@ -198,6 +240,23 @@ Sessions, round table results, and transcript search are already keyed by `{tena
    ```
 
 3. **Feedback and trust**: Already scoped by `project_id` in all database tables. Map `auth.tenant_id` to `project_id` when creating trackers.
+
+### Complete data store isolation checklist
+
+| Data Store | Current Isolation | What You Add |
+|------------|------------------|--------------|
+| Chat sessions (`_orchestrators`) | Keyed by `tenant_id:user_id:session_id` | **Already isolated** |
+| Round table result cache | Keyed by `task_id` only | Key by `auth.tenant_id:task_id` |
+| Transcript search index | Stores `tenant_id` in metadata | Filter results by `auth.tenant_id` |
+| Feedback signals (SQLite) | Has `project_id` column | Map `auth.tenant_id` to `project_id` |
+| Agent trust scores (SQLite) | Has `project_id` column | Map `auth.tenant_id` to `project_id` |
+| User preferences (SQLite) | Has `project_id` column | Map `auth.tenant_id` to `project_id` |
+| Check-ins (SQLite) | Has `project_id` column | Map `auth.tenant_id` to `project_id` |
+| Vector store (ChromaDB) | Collection per `project_id` | Use `tenant_id` in collection name |
+| Agent registry | Has `tenant_id` + `visibility` fields | Use `list_for_tenant()` everywhere |
+| LLM usage tracking | Global accumulator | Aggregate by `auth.tenant_id` for billing |
+
+> **SECURITY:** Prefer tenant-scoped queries over post-query filtering. Post-query filtering (e.g., fetching all transcripts then removing other tenants') can leak data through timing side channels, error messages, or log entries. Where possible, pass `tenant_id` into the query itself.
 
 ### Agent isolation
 
@@ -238,15 +297,22 @@ POST /challenge -- Returns AgentChallenge JSON
 POST /vote      -- Returns AgentVote JSON
 ```
 
-See `docs/TUTORIAL.md` Part 5 for the full contract.
+See [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md) for the full HTTP contract with JSON schemas and examples.
 
 ### What the platform does automatically
 
-- **SSRF protection**: The agent's `base_url` is validated at registration (no private IPs, no cloud metadata endpoints)
-- **Response sanitization**: All agent responses are sanitized for prompt injection and size-limited
+- **SSRF protection**: The agent's `base_url` is validated at registration (no private IPs, no cloud metadata endpoints). Note: DNS can change between validation and request time (TOCTOU). For high-assurance deployments, validate IPs at connection time or use an IP allowlist.
+- **Response sanitization**: All agent responses are sanitized for prompt injection and size-limited (5MB body, 50K per field)
 - **Evidence enforcement**: The enforcement pipeline validates the agent's analysis before it enters the challenge phase
-- **Rate limiting**: Per-IP rate limits on all endpoints
+- **Rate limiting**: Per-IP rate limits on all endpoints (per-tenant when you add tenant-based keying)
 - **HMAC webhooks**: For async agents, webhook payloads are signed with HMAC-SHA256
+
+> **SECURITY: HMAC Webhook Verification**
+> - Set `WEBHOOK_SECRET` in production. Without it, signature verification is skipped entirely.
+> - The platform signs the raw request body with `hmac.new(secret, body, sha256)` and sends the signature in `X-Webhook-Signature: sha256=<hex>`.
+> - Agents should verify the signature before processing the payload.
+> - For replay protection, include a timestamp in the payload and reject requests older than 5 minutes.
+> - Rotate `WEBHOOK_SECRET` periodically. When rotating, accept both old and new secrets during the transition window.
 
 ### Onboarding checklist for a new team
 

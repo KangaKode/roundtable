@@ -170,6 +170,19 @@ make serve      # Start the API gateway
 
 ---
 
+## Documentation
+
+| You are... | Start here |
+|------------|------------|
+| Building your first agent | [TUTORIAL.md](docs/TUTORIAL.md) -- create, test, register, and run an agent in 30 minutes |
+| Understanding the architecture | [ARCHITECTURE.md](docs/ARCHITECTURE.md) -- modules, layering rules, design decisions |
+| Deploying as a multi-team platform | [PLATFORM_GUIDE.md](docs/PLATFORM_GUIDE.md) -- RBAC, tenant isolation, team onboarding |
+| Connecting an external agent (any language) | [AGENT_PROTOCOL.md](docs/AGENT_PROTOCOL.md) -- HTTP contract, JSON schemas, examples |
+| A manager or stakeholder | [TEAM_OVERVIEW.md](docs/TEAM_OVERVIEW.md) -- 5-minute plain-language overview |
+| Looking up a term | [GLOSSARY.md](docs/GLOSSARY.md) -- 25 AI/agent terms defined for non-experts |
+
+---
+
 ## What You Get
 
 Every scaffolded project includes **53+ Python source files** across 8 modules:
