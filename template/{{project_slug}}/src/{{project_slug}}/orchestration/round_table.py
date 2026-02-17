@@ -175,6 +175,7 @@ class RoundTableConfig:
     artifacts_dir: Path = Path(".aiscaffold/artifacts")
     write_artifacts: bool = True
     include_core_agents: bool = True  # Auto-inject Skeptic, Quality, Evidence agents
+    enforce_evidence: bool = True  # Run evidence enforcement pipeline on Phase 1 responses
 
 
 # =============================================================================
@@ -329,7 +330,35 @@ class RoundTable:
                 logger.error(f"[RoundTable] {self.agents[i].name} failed: {r}")
                 continue
             analyses.append(r)
+
+        if self.config.enforce_evidence:
+            analyses = await self._enforce_evidence(analyses, task)
+
         return analyses
+
+    async def _enforce_evidence(
+        self, analyses: list[AgentAnalysis], task: RoundTableTask
+    ) -> list[AgentAnalysis]:
+        """Run evidence enforcement pipeline on each analysis."""
+        try:
+            from ..enforcement import EvidenceEnforcementPipeline
+
+            pipeline = EvidenceEnforcementPipeline(llm_client=self.llm)
+            enforced = []
+            for analysis in analyses:
+                text = json.dumps(analysis.observations, default=str)
+                result = await pipeline.validate(analysis.agent_name, text, task)
+                if result.corrected_content and result.outcome != "accepted":
+                    logger.info(
+                        f"[RoundTable] {analysis.agent_name}: "
+                        f"{len(result.violations)} enforcement violations "
+                        f"({result.outcome})"
+                    )
+                enforced.append(analysis)
+            return enforced
+        except Exception as e:
+            logger.warning(f"[RoundTable] Evidence enforcement failed: {e}")
+            return analyses
 
     async def _phase_challenge(
         self, task: RoundTableTask, analyses: list[AgentAnalysis]

@@ -1,0 +1,219 @@
+"""Tests for the evidence enforcement pipeline."""
+
+import pytest
+
+from src.{{ project_slug }}.enforcement.fact_checker import FactChecker
+from src.{{ project_slug }}.enforcement.evidence_levels import EvidenceLevelEnforcer
+from src.{{ project_slug }}.enforcement.citation_validator import CitationValidator, DefaultSourceRegistry
+from src.{{ project_slug }}.enforcement.math_verifier import MathVerifier
+from src.{{ project_slug }}.enforcement.pipeline import EvidenceEnforcementPipeline
+from src.{{ project_slug }}.enforcement.models import ValidationResult
+
+
+# =============================================================================
+# FACT CHECKER
+# =============================================================================
+
+
+class TestFactChecker:
+    def setup_method(self):
+        self.checker = FactChecker()
+
+    def test_detects_percentage_confidence(self):
+        result = self.checker.check("The data shows 90% confident match")
+        assert any("confidence" in v.rule for v in result.violations)
+
+    def test_detects_decimal_confidence(self):
+        result = self.checker.check("confidence: 0.85 on this finding")
+        assert any("confidence" in v.rule for v in result.violations)
+
+    def test_detects_categorical_confidence(self):
+        result = self.checker.check("HIGH confidence that this is correct")
+        assert any("confidence" in v.rule for v in result.violations)
+
+    def test_detects_probably(self):
+        result = self.checker.check("The user probably accessed the system")
+        assert any("speculation" in v.rule for v in result.violations)
+
+    def test_detects_likely_indicates(self):
+        result = self.checker.check("This likely indicates a breach")
+        assert any("speculation" in v.rule for v in result.violations)
+
+    def test_detects_this_suggests(self):
+        result = self.checker.check("This suggests unauthorized access")
+        assert any("speculation" in v.rule for v in result.violations)
+
+    def test_detects_i_think(self):
+        result = self.checker.check("I think the root cause is X")
+        assert any("opinion" in v.rule for v in result.violations)
+
+    def test_detects_i_believe(self):
+        result = self.checker.check("I believe this is a false positive")
+        assert any("opinion" in v.rule for v in result.violations)
+
+    def test_detects_seems_to(self):
+        result = self.checker.check("The pattern seems to indicate lateral movement")
+        assert any("hedging" in v.rule for v in result.violations)
+
+    def test_detects_might_be(self):
+        result = self.checker.check("This might be related to the outage")
+        assert any("hedging" in v.rule for v in result.violations)
+
+    def test_accepts_clean_evidence_based_text(self):
+        result = self.checker.check(
+            "[VERIFIED: access_logs:row_456] User authenticated at 14:32 UTC. "
+            "[CORROBORATED: access_logs + vpn_logs] Login from expected IP range."
+        )
+        assert result.outcome == "accepted"
+        assert len(result.violations) == 0
+
+    def test_rejects_with_3_plus_critical(self):
+        result = self.checker.check(
+            "I think this probably indicates a breach. "
+            "The data likely indicates unauthorized access. "
+            "I believe the attacker used stolen credentials."
+        )
+        assert result.outcome == "rejected"
+
+    def test_challenges_with_fewer_critical(self):
+        result = self.checker.check(
+            "The user probably accessed the system at 14:32."
+        )
+        assert result.outcome == "challenged"
+
+
+# =============================================================================
+# EVIDENCE LEVEL ENFORCER
+# =============================================================================
+
+
+class TestEvidenceLevelEnforcer:
+    def setup_method(self):
+        self.enforcer = EvidenceLevelEnforcer()
+
+    def test_verified_requires_source_reference(self):
+        result = self.enforcer.check("[VERIFIED: just_source] Missing reference")
+        assert any("verified" in v.rule for v in result.violations)
+
+    def test_verified_accepts_source_colon_reference(self):
+        result = self.enforcer.check("[VERIFIED: logs:row_42] Found the event")
+        assert result.outcome == "accepted"
+
+    def test_corroborated_requires_two_sources(self):
+        result = self.enforcer.check("[CORROBORATED: only_one_source] Single source")
+        assert any("corroborated" in v.rule for v in result.violations)
+
+    def test_corroborated_accepts_two_sources(self):
+        result = self.enforcer.check("[CORROBORATED: logs + alerts] Both agree")
+        assert result.outcome == "accepted"
+
+    def test_corroborated_accepts_three_sources(self):
+        result = self.enforcer.check("[CORROBORATED: okta + chrome + slack] All agree")
+        assert result.outcome == "accepted"
+
+    def test_indicated_accepts_named_source(self):
+        result = self.enforcer.check("[INDICATED: chrome_logs] Pattern found")
+        assert result.outcome == "accepted"
+
+    def test_possible_accepted(self):
+        result = self.enforcer.check("[POSSIBLE] Collecting VPN logs would clarify")
+        assert result.outcome == "accepted"
+
+    def test_no_tags_accepted(self):
+        result = self.enforcer.check("Plain text without any evidence tags")
+        assert result.outcome == "accepted"
+
+
+# =============================================================================
+# CITATION VALIDATOR
+# =============================================================================
+
+
+class TestCitationValidator:
+    def test_default_registry_accepts_all(self):
+        validator = CitationValidator()
+        result = validator.check("[VERIFIED: anything:row_1] Accepted by default")
+        assert result.outcome == "accepted"
+
+    def test_custom_registry_rejects_unknown_source(self):
+        class StrictRegistry:
+            def source_exists(self, name):
+                return name == "okta_logs"
+            def reference_exists(self, source, ref):
+                return True
+
+        validator = CitationValidator(registry=StrictRegistry())
+        result = validator.check("[VERIFIED: fake_source:row_1] Unknown source")
+        assert result.outcome == "rejected"
+        assert any("unknown_source" in v.rule for v in result.violations)
+
+    def test_custom_registry_accepts_known_source(self):
+        class StrictRegistry:
+            def source_exists(self, name):
+                return name == "okta_logs"
+            def reference_exists(self, source, ref):
+                return True
+
+        validator = CitationValidator(registry=StrictRegistry())
+        result = validator.check("[VERIFIED: okta_logs:row_456] Event found")
+        assert result.outcome == "accepted"
+
+
+# =============================================================================
+# MATH VERIFIER
+# =============================================================================
+
+
+class TestMathVerifier:
+    def test_default_provider_skips_verification(self):
+        verifier = MathVerifier()
+        result = verifier.check("The error rate was 12.3%")
+        assert result.outcome == "accepted"
+
+
+# =============================================================================
+# PIPELINE
+# =============================================================================
+
+
+class TestEvidenceEnforcementPipeline:
+    @pytest.mark.asyncio
+    async def test_accepts_clean_response(self):
+        pipeline = EvidenceEnforcementPipeline()
+        result = await pipeline.validate(
+            "test_agent",
+            "[VERIFIED: logs:row_42] User authenticated successfully."
+        )
+        assert result.outcome == "accepted"
+
+    @pytest.mark.asyncio
+    async def test_challenges_speculation(self):
+        pipeline = EvidenceEnforcementPipeline()
+        result = await pipeline.validate(
+            "test_agent",
+            "The user probably accessed the file at 14:32."
+        )
+        assert result.outcome == "challenged"
+        assert len(result.violations) > 0
+
+    @pytest.mark.asyncio
+    async def test_rejects_heavy_speculation(self):
+        pipeline = EvidenceEnforcementPipeline()
+        result = await pipeline.validate(
+            "test_agent",
+            "I think this probably indicates a breach and I believe "
+            "the attacker likely used stolen credentials. It appears "
+            "that the system was compromised. This suggests lateral movement."
+        )
+        assert result.outcome == "rejected"
+
+    @pytest.mark.asyncio
+    async def test_combines_violations_from_all_validators(self):
+        pipeline = EvidenceEnforcementPipeline()
+        result = await pipeline.validate(
+            "test_agent",
+            "This probably happened [VERIFIED: no_ref] and [CORROBORATED: single_source] agree"
+        )
+        rules = [v.rule for v in result.violations]
+        assert any("banned_pattern" in r for r in rules)
+        assert any("evidence_level" in r for r in rules)

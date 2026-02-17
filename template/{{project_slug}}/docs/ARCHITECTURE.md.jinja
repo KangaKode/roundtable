@@ -85,12 +85,23 @@ Lightweight orchestrator-worker pattern for real-time interaction. Lead agent se
 - `example_agent.py` -- Reference implementation of `AgentProtocol`
 - `remote.py` -- `RemoteAgent` adapter wrapping HTTP endpoints as `AgentProtocol`
 - `registry.py` -- `AgentRegistry` managing local + remote agents with health checks
-- `core/` -- Three core safety agents (auto-included in every round table):
+- `core/` -- Five core safety agents (auto-included in every round table):
   - `skeptic.py` -- Devil's advocate: challenges assumptions, demands evidence, flags logical fallacies
   - `quality.py` -- Completeness checker: tracks requirement coverage, flags gaps in scope
   - `evidence.py` -- Claim verifier: grades evidence strength, flags speculation presented as fact
+  - `fact_checker_agent.py` -- Challenges speculation language in deliberation, explains why it's problematic
+  - `citation_agent.py` -- Enforces evidence level tagging (VERIFIED/CORROBORATED/INDICATED/POSSIBLE)
 
-Core agents are meta-agents that evaluate *how well* the analysis was done, not *what* was analyzed. They participate automatically unless `include_core_agents=False` is set in `RoundTableConfig`. This is a deliberate opt-out -- the default is safety-on
+Core agents are meta-agents that evaluate *how well* the analysis was done, not *what* was analyzed. They participate automatically unless `include_core_agents=False` is set in `RoundTableConfig`. This is a deliberate opt-out -- the default is safety-on.
+
+### Evidence Enforcement Pipeline (`enforcement/`)
+- `fact_checker.py` -- Scans for banned patterns: speculation ("probably"), opinion ("I think"), hedging ("seems to"), fake confidence ("90% confident")
+- `evidence_levels.py` -- Validates VERIFIED/CORROBORATED/INDICATED/POSSIBLE tag format
+- `citation_validator.py` -- Checks cited sources exist (pluggable SourceRegistry)
+- `math_verifier.py` -- Validates numeric claims against ground truth (pluggable GroundTruthProvider)
+- `pipeline.py` -- Orchestrates all validators with reject-and-rewrite behavior
+
+The pipeline runs after Phase 1 (analysis) and before Phase 2 (challenge). Rejected responses get a correction prompt and are retried up to 2 times. Disable with `enforce_evidence=False` in `RoundTableConfig`
 
 External agents implement 3 HTTP endpoints (`/analyze`, `/challenge`, `/vote`) in any language.
 

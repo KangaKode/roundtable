@@ -93,7 +93,13 @@ Every agent in a scaffolded project is prompted to cite evidence for findings. T
 | **INDICATED** | "Data suggests this, but there are gaps" | Must name the source and acknowledge what data is missing. |
 | **POSSIBLE** | "Cannot rule out -- warrants investigation" | Must explain what additional data would confirm or deny the finding. |
 
-The Skeptic and Evidence core agents enforce these levels during the challenge phase. Claims presented with high confidence but only INDICATED or POSSIBLE evidence are flagged. Speculation language ("likely", "probably", "I think", "seems to") is challenged as insufficient.
+**Enforcement pipeline** -- Runs automatically after Phase 1, before Phase 2:
+1. **FactChecker** scans for banned patterns: "probably", "I think", "90% confident", "seems to"
+2. **EvidenceLevelEnforcer** validates tag format (VERIFIED needs source:ref, CORROBORATED needs 2+ sources)
+3. **CitationValidator** checks that cited sources exist (pluggable SourceRegistry)
+4. **MathVerifier** validates numeric claims against ground truth (pluggable)
+
+Responses with 3+ critical violations are **rejected and auto-rewritten** via LLM correction prompt (up to 2 retries). The FactChecker and Citation core agents also participate in deliberation to explain *why* violations are problematic.
 
 ---
 
@@ -121,7 +127,7 @@ Every scaffolded project includes **53+ Python source files** across 8 modules:
 
 ### Two Interaction Modes
 
-- **Round Table** -- Full 4-phase multi-agent deliberation (Strategy, Independent Analysis, Challenge, Synthesis + Voting). For complex decisions needing all perspectives. Core safety agents (Skeptic, Quality, Evidence) participate automatically.
+- **Round Table** -- Full 4-phase multi-agent deliberation (Strategy, Independent Analysis, Challenge, Synthesis + Voting). For complex decisions needing all perspectives. Five core safety agents (Skeptic, Quality, Evidence, FactChecker, Citation) participate automatically. Evidence enforcement pipeline runs between Phase 1 and Phase 2.
 - **Chat Orchestrator** -- Lightweight real-time chat. A lead agent selectively consults 1-3 specialists, cross-checks for agreement, and escalates to the round table when needed.
 
 ### API Gateway (FastAPI)
@@ -289,7 +295,7 @@ make validate-matrix (~2min) -- 3 configurations (web-app/multi-agent/api-servic
 template/{{project_slug}}/
   src/{{project_slug}}/
     agents/           # Agent implementations + core safety agents
-      core/           # Skeptic, Quality, Evidence (auto-included)
+      core/           # Skeptic, Quality, Evidence, FactChecker, Citation (auto-included)
       example_agent.py
       remote.py       # HTTP adapter for any-language agents
       registry.py     # Agent management with tenant visibility
