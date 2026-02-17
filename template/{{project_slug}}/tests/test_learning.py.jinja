@@ -287,9 +287,10 @@ class TestEmbeddingService:
         svc = EmbeddingService()
         svc._provider = "local"
         svc._dimensions = 4
-        import numpy as np
         mock_model = MagicMock()
-        mock_model.encode.return_value = np.array([0.1, 0.2, 0.3, 0.4])
+        mock_array = MagicMock()
+        mock_array.tolist.return_value = [0.1, 0.2, 0.3, 0.4]
+        mock_model.encode.return_value = mock_array
         svc._model = mock_model
         svc._cache.clear()
         result = svc.embed("test")
