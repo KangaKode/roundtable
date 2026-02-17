@@ -11,9 +11,9 @@ One-command scaffold ([copier](https://copier.readthedocs.io/)) for AI agent pro
 - **Quality** -- tracks requirement coverage, catches gaps across agents
 - **Evidence & compliance** -- grades claim strength, flags speculation-as-fact language, enforces evidence-level tagging (VERIFIED/CORROBORATED/INDICATED/POSSIBLE)
 
-**Secure** -- SSRF protection, prompt injection defense, rate limiting, HMAC-SHA256 webhook verification, API key auth with multi-tenancy structural prep.
+**Secure** -- SSRF protection, prompt injection defense, rate limiting, HMAC-SHA256 webhook verification, API key auth with tenant-scoped request isolation.
 
-**Cost-efficient** -- Anthropic/OpenAI/Google prompt caching (~90% savings on cached prefixes per provider pricing), per-call token tracking with budget enforcement.
+**Cost-efficient** -- Anthropic/OpenAI/Google prompt caching (up to ~90% savings on cached content), per-call token tracking with budget enforcement.
 
 **Learning** -- Feedback loops, trust scores, human-in-the-loop approval gates.
 
@@ -25,13 +25,13 @@ One-command scaffold ([copier](https://copier.readthedocs.io/)) for AI agent pro
 
 ## Who Is This For?
 
-**If you're tired of LLM hallucinations** -- the enforcement pipeline rejects speculation ("probably", "I think", "90% confident") and requires evidence citations on every finding. Agents that can't cite their sources get auto-corrected via LLM rewrite. Four evidence levels (VERIFIED, CORROBORATED, INDICATED, POSSIBLE) make claim strength explicit.
+**If you're tired of LLM hallucinations** -- the enforcement pipeline rejects speculation ("probably", "I think", "90% confident") and requires evidence citations on every finding. Agents that can't cite their sources get auto-corrected via LLM rewrite. Four evidence levels inspired by intelligence analysis frameworks (VERIFIED, CORROBORATED, INDICATED, POSSIBLE) make claim strength explicit.
 
 **If you're building internal AI tools** -- security is baked in, not bolted on. SSRF protection, prompt injection defense, HMAC-SHA256 webhooks, rate limiting, and API auth are already wired into every endpoint. You don't have to build this yourself.
 
-**If you're evaluating build-vs-buy for multi-agent** -- the round table protocol, chat orchestrator, external agent API (any language), and [Platform Deployment Guide](docs/PLATFORM_GUIDE.md) save you 3+ months of architecture work. RBAC, tenant isolation, and agent visibility are structurally ready.
+**If you're evaluating build-vs-buy for multi-agent** -- the round table protocol, chat orchestrator, external agent API (any language), and [Platform Deployment Guide](docs/PLATFORM_GUIDE.md) avoid re-implementing common multi-agent patterns from scratch. RBAC, tenant isolation, and agent visibility are structurally ready.
 
-**If cost matters** -- prompt caching cuts LLM costs by ~90% on repeated interactions (Anthropic cache_control, OpenAI prefix caching). Per-call token tracking and budget enforcement prevent runaway spending. You see exactly what each round table costs.
+**If cost matters** -- prompt caching cuts LLM costs by up to ~90% on cached content (Anthropic cache_control, OpenAI prefix caching). Per-call token tracking and budget enforcement prevent runaway spending. You see exactly what each round table costs.
 
 ---
 
