@@ -1,4 +1,4 @@
-# aiscaffold v3
+# roundtable
 
 **AI Agent Platform Scaffold -- Multi-Agent Deliberation with Safety Agents Built In**
 
@@ -28,7 +28,7 @@ One-command scaffold ([copier](https://copier.readthedocs.io/)) for AI agent pro
 If you just want a single agent behind an API (no round table, no multi-agent), here's the fast path:
 
 ```bash
-copier copy gh:KangaKode/aiscaffold my-project --trust
+copier copy gh:KangaKode/roundtable my-project --trust
 cd my-project && python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 make new-agent NAME=my_analyst DOMAIN="code review"
@@ -157,7 +157,7 @@ Core agents are **meta-agents** -- they evaluate *how well* the analysis was don
 ```bash
 pip install copier
 
-copier copy gh:KangaKode/aiscaffold my-project --trust
+copier copy gh:KangaKode/roundtable my-project --trust
 
 cd my-project
 python3 -m venv venv && source venv/bin/activate
