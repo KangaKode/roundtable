@@ -1,25 +1,25 @@
 # aiscaffold v3
 
-**AI Agent Platform Scaffold -- Multi-Agent Deliberation with Built-In Safety Agents**
+**AI Agent Platform Scaffold -- Multi-Agent Deliberation with Safety Agents Built In**
+
+Multi-agent systems need structured deliberation and evidence discipline -- or they drift toward overconfident, unsupported claims. This scaffold gives you both from the first command.
 
 One-command scaffold ([copier](https://copier.readthedocs.io/)) for AI agent projects: multi-agent round table with adversarial safety agents, chat orchestrator, HTTP API for agents in any language, prompt caching, adaptive learning, and deployment templates (Docker + Kubernetes).
 
 **Safety-first deliberation** -- Every round table includes five core safety agents by default:
 - **Skeptic** -- challenges assumptions, demands evidence, flags logical fallacies
 - **Quality** -- tracks requirement coverage, catches gaps across agents
-- **Evidence** -- grades claim strength, flags speculation presented as fact
-- **FactChecker** -- scans for banned speculation language, explains why it's problematic
-- **Citation** -- enforces evidence level tagging (VERIFIED/CORROBORATED/INDICATED/POSSIBLE)
+- **Evidence & compliance** -- grades claim strength, flags speculation-as-fact language, enforces evidence-level tagging (VERIFIED/CORROBORATED/INDICATED/POSSIBLE)
 
-**Secure** -- SSRF protection, prompt injection defense, rate limiting, HMAC-SHA256 webhook verification, input validation at every boundary, API key auth with multi-tenancy structural prep.
+**Secure** -- SSRF protection, prompt injection defense, rate limiting, HMAC-SHA256 webhook verification, API key auth with multi-tenancy structural prep.
 
 **Cost-efficient** -- Anthropic/OpenAI/Google prompt caching (~90% savings on cached prefixes per provider pricing), per-call token tracking with budget enforcement.
 
-**Learning** -- Feedback tracking, trust scores, preference graduation, check-in system, human-in-the-loop approval gates.
+**Learning** -- Feedback loops, trust scores, human-in-the-loop approval gates.
 
-**Scalable** -- Docker, Kubernetes with HPA + secrets + security context, external agents via HTTP in any language.
+**Scalable** -- Docker & Kubernetes (HPA, secrets, security context), external agents via HTTP in any language.
 
-214 tests, 79% coverage, 16-check validation pipeline (ruff, bandit, red team scan, AI checks, agent review, pytest).
+*243 tests · 79% coverage · 16-check validation pipeline (ruff, bandit, red team, AI checks, pytest)*
 
 ---
 
@@ -134,7 +134,7 @@ Every scaffolded project includes **53+ Python source files** across 8 modules:
 
 ### API Gateway (FastAPI)
 
-10 route modules exposing everything over HTTP:
+9 route modules exposing everything over HTTP:
 
 - `POST /api/v1/round-table/tasks` -- Submit task for full multi-agent deliberation
 - `GET  /api/v1/round-table/search?q=` -- Semantic search over past deliberations
@@ -284,7 +284,7 @@ The scaffold itself is validated by a 16-check pipeline:
 make quick     (~5s)  -- Template-level checks (banned patterns, secrets, Jinja syntax)
 make validate  (~8s)  -- Generate test project + full suite:
                          ruff lint, bandit security, import validation, red team,
-                         AI checks, agent review, pytest (214 tests, 79% coverage),
+                         AI checks, agent review, pytest (243 tests, 79% coverage),
                          file structure verification
 make validate-matrix (~2min) -- 3 configurations (web-app/multi-agent/api-service)
 ```
@@ -314,7 +314,7 @@ template/{{project_slug}}/
   deploy/k8s/         # Kubernetes manifests
   .cursor/agents/     # 14 development subagent definitions
   docs/               # Progressive disclosure documentation
-  tests/              # 214 tests across 11 test files
+  tests/              # 243 tests across 12 test files
   evals/              # Eval infrastructure
 ```
 
